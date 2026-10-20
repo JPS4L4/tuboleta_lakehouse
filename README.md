@@ -105,7 +105,21 @@ Variables de entorno (opcionales):
 
 La rama de CockroachDB espera tablas con los mismos nombres y columnas que las de Bronze (`zonas`, `eventos`, `sillas`, `usuarios`, `canales`, `compras_confirmadas`, `intentos_compra`). No se probó contra un clúster real. Si la base no responde, el paso de extracción termina con un mensaje que sugiere el modo sintético.
 
-## 6. Estructura
+## 6. Consultas en vivo (exposición)
+
+`scripts/consultar.py` abre DuckDB en memoria sobre los Parquet de Gold (requiere haber ejecutado antes `python main.py`) e imprime el resultado y el tiempo en milisegundos.
+
+```bash
+python -m scripts.consultar --lista        # consultas listas: ocupacion, embudo, vip, canales
+python -m scripts.consultar ocupacion      # ocupación e ingresos por evento y zona
+python -m scripts.consultar embudo         # embudo de conversión por evento
+python -m scripts.consultar vip            # SCD2: ingresos VIP por versión de precio
+python -m scripts.consultar "SELECT e.nombre_evento, COUNT(*) AS boletas FROM fact_ventas_boletas f JOIN dim_evento e USING (evento_sk) GROUP BY 1 ORDER BY 2 DESC"
+```
+
+Las tablas disponibles son las de Gold: `fact_ventas_boletas`, `fact_intentos_compra`, `dim_tiempo`, `dim_evento`, `dim_zona`, `dim_silla`, `dim_usuario` y `dim_canal`.
+
+## 7. Estructura
 
 ```
 tuboleta_lakehouse/
@@ -122,6 +136,7 @@ tuboleta_lakehouse/
 │   ├── transform_silver.py       # Bronze -> Silver + reporte de calidad
 │   ├── transform_gold.py         # Silver -> Gold (estrella, SCD2)
 │   ├── analyze.py                # consultas de negocio (DuckDB)
+│   ├── consultar.py              # consultas en vivo sobre Gold (exposición)
 │   └── benchmark.py              # OLTP vs columnar
 └── docs/
     ├── diseno_dimensional.md     # las 5 preguntas, SCD2, limitaciones
@@ -132,7 +147,7 @@ tuboleta_lakehouse/
     └── benchmark.md
 ```
 
-## 7. Volúmenes de la última ejecución
+## 8. Volúmenes de la última ejecución
 
 | Tabla | Filas |
 |---|---:|
@@ -142,7 +157,7 @@ tuboleta_lakehouse/
 | Eventos / versiones de zona | 5 / 6 |
 | `dim_tiempo` (granularidad de hora) | 5.656 |
 
-## 8. Benchmark
+## 9. Benchmark
 
 Agregación: boletas e ingresos por **evento x zona x mes** (60 grupos), con 208.236 ventas. No se mide la carga; se hace un calentamiento y se toma la mediana de 5 corridas. Los tres motores devuelven exactamente las mismas cifras (el pipeline lo verifica con una aserción). Detalle y condiciones en [`docs/benchmark.md`](docs/benchmark.md).
 
@@ -154,7 +169,7 @@ Agregación: boletas e ingresos por **evento x zona x mes** (60 grupos), con 208
 
 **Análisis.** DuckDB sobre Gold fue unas 21 veces más rápido que el almacén por filas, y buena parte de la ventaja ya aparece solo por leer Parquet columnar sin modelar (5,5x en Bronze); el modelado en estrella aporta otro factor de casi 4 sobre Bronze, porque evita limpiar al vuelo y trabaja con claves enteras y dimensiones pequeñas. La comparación no es perfectamente "manzanas con manzanas": DuckDB usa varios hilos (12 en esta máquina) y SQLite solo uno, y SQLite corre en memoria con índices pensados para buscar filas, no para recorrer 208.000 ventas. Además, con este volumen todas las consultas responden en menos de medio segundo; la diferencia se vuelve decisiva a millones de filas y no cambia el resultado de negocio. Los tiempos varían unos milisegundos entre ejecuciones.
 
-## 9. Resultados destacados
+## 10. Resultados destacados
 
 Salidas completas en [`docs/resultados_consultas.md`](docs/resultados_consultas.md).
 
@@ -165,7 +180,7 @@ Salidas completas en [`docs/resultados_consultas.md`](docs/resultados_consultas.
 - **Horarios:** tarde y noche concentran cerca del 70 % de las ventas; el primer día de venta de cada evento concentra alrededor del 10 %.
 - **Abandono:** los abandonos suman 3.869 millones de COP de precio de lista (cota superior del ingreso potencial perdido).
 
-## 10. Limitaciones
+## 11. Limitaciones
 
 - Los datos son sintéticos y las tasas (conversión, descuentos, pago tardío) son parámetros del generador.
 - Cada ejecución reconstruye Silver y Gold (carga completa, sin incrementales).
