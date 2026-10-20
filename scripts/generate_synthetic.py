@@ -63,7 +63,7 @@ EVENTOS = [
     ("E-002", "Clásico Paisa Nacional vs Medellín", "partido", "2026-07-11", "2026-05-25", 0.98, "Liga Profesional"),
     ("E-003", "Festival Sonidos del Valle", "concierto", "2026-08-08", "2026-06-15", 0.93, "Valle Live"),
     ("E-004", "Gira Urbana Medellín", "concierto", "2026-09-12", "2026-07-20", 0.90, "TuBoleta Producciones"),
-    ("E-005", "Final del Futbol Colombiano", "partido", "2026-10-17", "2026-08-31", 0.95, "Liga Profesional"),
+    ("E-005", "Final del Fútbol Colombiano", "partido", "2026-10-17", "2026-08-31", 0.95, "Liga Profesional"),
 ]
 RECINTO = "Estadio Atanasio Girardot"
 CIUDAD = "Medellín"
