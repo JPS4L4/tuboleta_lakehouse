@@ -37,7 +37,9 @@ Flujo de una compra: entrar a la fila, ser admitido, bloquear una silla (lock co
                   scripts/analyze.py         9 consultas + benchmark -> docs/
 ```
 
-El diagrama de la estrella está en [`docs/modelo_dimensional.dbml`](docs/modelo_dimensional.dbml). La imagen `docs/modelo_dimensional.png` **la renderiza el equipo** pegando ese DBML en [dbdiagram.io](https://dbdiagram.io) (aún no está incluida en el repositorio).
+![Modelo dimensional en estrella](docs/modelo_dimensional.png)
+
+El modelo fuente está en [`docs/modelo_dimensional.dbml`](docs/modelo_dimensional.dbml) (se puede abrir en [dbdiagram.io](https://dbdiagram.io)); la imagen se generó a partir de ese mismo DBML.
 
 ```
 DIM_TIEMPO --+                    +-- DIM_CANAL
@@ -124,6 +126,7 @@ tuboleta_lakehouse/
 └── docs/
     ├── diseno_dimensional.md     # las 5 preguntas, SCD2, limitaciones
     ├── modelo_dimensional.dbml   # modelo para dbdiagram.io
+    ├── modelo_dimensional.png    # diagrama en estrella
     ├── reporte_calidad_silver.txt
     ├── resultados_consultas.md
     └── benchmark.md
