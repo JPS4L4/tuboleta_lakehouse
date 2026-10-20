@@ -174,9 +174,8 @@ Evolución futura (CDC con Kafka, CockroachDB real, cargas incrementales, SCD2 e
 
 ## Integrantes
 
-- Pendiente
-- Pendiente
-- Pendiente
+- Luis Manuel Contreras
+- Juan Pablo Salazar
 
 ## Docente
 
