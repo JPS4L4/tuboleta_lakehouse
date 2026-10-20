@@ -1,0 +1,117 @@
+// Modelo dimensional TuBoleta - pegar en https://dbdiagram.io para generar docs/modelo_dimensional.png
+// Dos tablas de hechos con dimensiones conformadas. dim_zona es SCD Tipo 2.
+
+Table fact_ventas_boletas {
+  compra_id varchar [pk, note: 'Dimensión degenerada. Una fila = una silla vendida y pagada en un evento']
+  tiempo_sk int [not null, ref: > dim_tiempo.tiempo_sk]
+  evento_sk int [not null, ref: > dim_evento.evento_sk]
+  zona_sk int [not null, ref: > dim_zona.zona_sk, note: 'Versión de la zona vigente en la fecha de pago']
+  silla_sk int [not null, ref: > dim_silla.silla_sk]
+  usuario_sk int [not null, ref: > dim_usuario.usuario_sk]
+  canal_sk int [not null, ref: > dim_canal.canal_sk]
+  precio_pagado bigint [not null, note: 'Aditiva. precio_base de la versión vigente menos descuento']
+  cantidad int [not null, note: 'Aditiva. Siempre 1']
+  descuento_aplicado bigint [not null, note: 'Aditiva']
+  tiempo_hasta_pago_seg int [note: 'No aditiva. Solo AVG / percentiles']
+  es_pago_tardio smallint [not null, note: 'Flag 0/1. Pago en el último 20% del TTL del lock']
+
+  indexes {
+    (evento_sk, silla_sk) [unique, note: 'Cero double-booking']
+  }
+
+  Note: 'Solo compras confirmadas y pagadas. Los abandonos NO son ventas.'
+}
+
+Table fact_intentos_compra {
+  intento_id varchar [pk, note: 'Dimensión degenerada. Una fila = un intento de compra (lock de silla)']
+  compra_id varchar [ref: - fact_ventas_boletas.compra_id, note: 'Solo cuando resultado = COMPRA']
+  tiempo_sk int [not null, ref: > dim_tiempo.tiempo_sk]
+  evento_sk int [not null, ref: > dim_evento.evento_sk]
+  zona_sk int [not null, ref: > dim_zona.zona_sk, note: 'Versión vigente en la fecha del intento']
+  silla_sk int [not null, ref: > dim_silla.silla_sk]
+  usuario_sk int [not null, ref: > dim_usuario.usuario_sk]
+  canal_sk int [not null, ref: > dim_canal.canal_sk]
+  resultado varchar [not null, note: 'COMPRA | ABANDONO | RECHAZO_UNIQUE']
+  es_compra smallint [not null]
+  es_abandono smallint [not null, note: 'TTL del lock venció sin pago; silla liberada']
+  es_rechazo_unique smallint [not null, note: 'La silla ya estaba vendida; el UNIQUE rechazó el INSERT']
+  tiempo_en_fila_seg int [note: 'No aditiva. Solo AVG / percentiles']
+  precio_lista bigint [note: 'Aditiva. Precio de lista de la silla en la fecha del intento']
+
+  Note: 'Resultados de intentos que el sistema operacional persiste. El estado efímero de Redis no es un hecho.'
+}
+
+Table dim_tiempo {
+  tiempo_sk int [pk, note: 'YYYYMMDDHH']
+  fecha date [not null]
+  anio int [not null]
+  trimestre int [not null]
+  mes int [not null]
+  mes_nombre varchar [not null]
+  dia int [not null]
+  dia_semana int [not null, note: '1 = lunes ... 7 = domingo']
+  dia_nombre varchar [not null]
+  es_fin_semana boolean [not null]
+  hora int [not null]
+  franja_horaria varchar [not null, note: 'madrugada | mañana | tarde | noche']
+
+  Note: 'SCD Tipo 0 (nunca cambia). Granularidad de hora.'
+}
+
+Table dim_evento {
+  evento_sk int [pk]
+  evento_id varchar [not null]
+  nombre_evento varchar [not null]
+  tipo_evento varchar [not null, note: 'concierto | partido']
+  recinto varchar [not null]
+  ciudad varchar [not null]
+  fecha_evento date [not null]
+  inicio_ventas date [not null]
+  aforo_total int [not null]
+  organizador varchar [not null]
+
+  Note: 'SCD Tipo 1'
+}
+
+Table dim_zona {
+  zona_sk int [pk, note: 'Una clave por versión de la zona']
+  zona_id varchar [not null, note: 'Clave de negocio estable entre versiones']
+  nombre_zona varchar [not null]
+  tipo_zona varchar [not null]
+  capacidad_zona int [not null]
+  precio_base bigint [not null]
+  valido_desde date [not null]
+  valido_hasta date [not null, note: '9999-12-31 para la versión vigente']
+  activo boolean [not null, note: 'true solo en la versión vigente']
+
+  Note: 'SCD Tipo 2. Los análisis agrupan por zona_id, no por versión.'
+}
+
+Table dim_silla {
+  silla_sk int [pk]
+  silla_id varchar [not null]
+  zona_id varchar [not null]
+  fila varchar [not null]
+  numero int [not null]
+  categoria varchar [not null]
+
+  Note: 'SCD Tipo 1'
+}
+
+Table dim_usuario {
+  usuario_sk int [pk]
+  usuario_id varchar [not null]
+  segmento varchar [not null]
+  canal_preferido varchar [not null]
+
+  Note: 'SCD Tipo 1 (Tipo 2 queda como evolución futura)'
+}
+
+Table dim_canal {
+  canal_sk int [pk]
+  canal_id varchar [not null]
+  nombre varchar [not null, note: 'app | web | taquilla | DESCONOCIDO']
+  digital_flag boolean [not null]
+
+  Note: 'SCD Tipo 1'
+}

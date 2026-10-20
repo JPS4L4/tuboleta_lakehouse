@@ -1,0 +1,6 @@
+# Parquet regenerables (los directorios se conservan con .gitkeep)
+lakehouse/**/*.parquet
+
+.venv/
+__pycache__/
+.env
