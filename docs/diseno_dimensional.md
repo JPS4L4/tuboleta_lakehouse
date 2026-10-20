@@ -72,6 +72,18 @@ Notas:
 - **ABANDONO**: el TTL del lock venció sin pago y la silla se liberó.
 - **RECHAZO_UNIQUE**: el `INSERT` fue rechazado por la restricción `UNIQUE` porque la silla ya estaba vendida. Muestra que la garantía de consistencia la da CockroachDB y no el lock de Redis.
 
+### Métricas semi-aditivas
+
+Con esta granularidad (una silla vendida o un intento por fila) **ninguna métrica es semi-aditiva**: cada medida es aditiva, no aditiva o un flag, y no representa un saldo que se mida en un instante.
+
+Una métrica semi-aditiva aparecería con una **tabla de hechos de instantánea periódica** del inventario, por ejemplo `fact_inventario_zona_dia` con `sillas_disponibles` por zona y día:
+
+| Métrica (futura) | Por zona / evento | A lo largo del tiempo | Cómo agregarla en el tiempo |
+|---|---|---|---|
+| `sillas_disponibles` | Aditiva (se puede sumar) | **No aditiva** (sumar días no tiene sentido) | último valor del período o promedio |
+
+Es una evolución futura: hoy el inventario se deriva de las ventas y no se persiste como instantánea.
+
 ## Pregunta 5 — ¿Cómo manejamos los cambios lentos? (SCD Tipo 2 en `dim_zona`)
 
 Cuando cambia el `precio_base` (o la capacidad) de una zona:
