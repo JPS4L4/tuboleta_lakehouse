@@ -1,0 +1,71 @@
+REPORTE DE CALIDAD - CAPA SILVER
+Generado: 2026-10-20 11:08
+============================================================
+
+Tabla: canales
+  Archivo Bronze:        canales_20261020_1108.parquet
+  Filas Bronze:          3
+  Filas Silver:          3
+  % retenido:            100.00 %
+  Duplicados eliminados: 0
+  Descartadas sin clave: 0
+  Nulos resueltos:       0
+
+Tabla: zonas
+  Archivo Bronze:        zonas_20261020_1108.parquet
+  Filas Bronze:          6
+  Filas Silver:          6
+  % retenido:            100.00 %
+  Duplicados eliminados: 0
+  Descartadas sin clave: 0
+  Nulos resueltos:       0
+  Rango de valido_desde: 2026-01-01 a 2026-07-01
+
+Tabla: eventos
+  Archivo Bronze:        eventos_20261020_1108.parquet
+  Filas Bronze:          5
+  Filas Silver:          5
+  % retenido:            100.00 %
+  Duplicados eliminados: 0
+  Descartadas sin clave: 0
+  Nulos resueltos:       0
+  Rango de fecha_evento: 2026-04-18 a 2026-10-17
+
+Tabla: sillas
+  Archivo Bronze:        sillas_20261020_1108.parquet
+  Filas Bronze:          45.000
+  Filas Silver:          45.000
+  % retenido:            100.00 %
+  Duplicados eliminados: 0
+  Descartadas sin clave: 0
+  Nulos resueltos:       0
+
+Tabla: usuarios
+  Archivo Bronze:        usuarios_20261020_1108.parquet
+  Filas Bronze:          150.750
+  Filas Silver:          150.000
+  % retenido:            99.50 %
+  Duplicados eliminados: 750
+  Descartadas sin clave: 0
+  Nulos resueltos:       0
+
+Tabla: compras_confirmadas
+  Archivo Bronze:        compras_confirmadas_20261020_1108.parquet
+  Filas Bronze:          210.358
+  Filas Silver:          208.236
+  % retenido:            98.99 %
+  Duplicados eliminados: 2.082
+  Descartadas sin clave: 40
+  Nulos resueltos:       3.101 (canal_id -> DESCONOCIDO)
+  Rango de fecha_compra: 2026-02-23 10:00:01 a 2026-10-16 23:59:27
+  Suma de precio_pagado: Bronze 22.352.656.600 | Silver 22.126.123.800 COP
+
+Tabla: intentos_compra
+  Archivo Bronze:        intentos_compra_20261020_1108.parquet
+  Filas Bronze:          262.936
+  Filas Silver:          260.294
+  % retenido:            99.00 %
+  Duplicados eliminados: 2.602
+  Descartadas sin clave: 40
+  Nulos resueltos:       3.906 (canal_id -> DESCONOCIDO)
+  Rango de fecha_intento: 2026-02-23 09:51:29 a 2026-10-17 00:22:59
