@@ -144,7 +144,10 @@ tuboleta_lakehouse/
     ├── modelo_dimensional.png    # diagrama en estrella
     ├── reporte_calidad_silver.txt
     ├── resultados_consultas.md
-    └── benchmark.md
+    ├── benchmark.md
+    ├── informe_final.md          # informe final (fuente versionada)
+    ├── informe_final.pdf         # informe final renderizado
+    └── entregables_tuboleta_lakehouse.zip  # paquete de entregables
 ```
 
 ## 8. Volúmenes de la última ejecución
@@ -178,7 +181,7 @@ Salidas completas en [`docs/resultados_consultas.md`](docs/resultados_consultas.
 - **Embudo:** de cada 100 intentos, cerca de 80 terminan en compra, 14 en abandono y 6 en rechazo `UNIQUE`; alrededor del 8 % de las ventas se paga en el último tramo del TTL. (Estas tasas salen de los parámetros del generador, no son datos reales.)
 - **SCD2 (VIP):** con el precio de 250.000 COP se vendieron 5.834 boletas (1.412 millones de COP) y con el de 280.000 COP, 8.041 (2.187 millones de COP); sin SCD2 esa diferencia de precio se perdería.
 - **Horarios:** tarde y noche concentran cerca del 70 % de las ventas; el primer día de venta de cada evento concentra alrededor del 10 %.
-- **Abandono:** los abandonos suman 3.869 millones de COP de precio de lista (cota superior del ingreso potencial perdido).
+- **Abandono:** los abandonos suman 3.868 millones de COP de precio de lista (cota superior del ingreso potencial perdido).
 
 ## 11. Limitaciones
 
