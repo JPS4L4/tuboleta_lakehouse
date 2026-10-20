@@ -154,11 +154,11 @@ CONSULTAS: list[tuple[str, str, str]] = [
 ]
 
 
-def _formatear_celda(valor: object) -> str:
-    """Formatea una celda para Markdown: miles con punto y decimales con coma."""
+def _formatear_celda(columna: str, valor: object) -> str:
+    """Formatea una celda para Markdown: miles con punto y decimales con coma (el año queda sin formato)."""
     if isinstance(valor, float):
         return f"{valor:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
-    if isinstance(valor, int) and not isinstance(valor, bool) and abs(valor) >= 10_000:
+    if isinstance(valor, int) and not isinstance(valor, bool) and columna != "anio":
         return f"{valor:,}".replace(",", ".")
     return str(valor)
 
@@ -167,7 +167,8 @@ def a_markdown(df: pd.DataFrame) -> str:
     """Convierte un DataFrame en una tabla Markdown."""
     encabezado = "| " + " | ".join(df.columns) + " |"
     separador = "|" + "|".join("---" for _ in df.columns) + "|"
-    filas = ["| " + " | ".join(_formatear_celda(v) for v in fila) + " |" for fila in df.itertuples(index=False, name=None)]
+    filas = ["| " + " | ".join(_formatear_celda(c, v) for c, v in zip(df.columns, fila)) + " |"
+             for fila in df.itertuples(index=False, name=None)]
     return "\n".join([encabezado, separador, *filas])
 
 
