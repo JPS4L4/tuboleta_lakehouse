@@ -156,6 +156,8 @@ CONSULTAS: list[tuple[str, str, str]] = [
 
 def _formatear_celda(columna: str, valor: object) -> str:
     """Formatea una celda para Markdown: miles con punto y decimales con coma (el año queda sin formato)."""
+    if isinstance(valor, datetime):
+        return f"{valor:%Y-%m-%d}"
     if isinstance(valor, float):
         return f"{valor:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
     if isinstance(valor, int) and not isinstance(valor, bool) and columna != "anio":
