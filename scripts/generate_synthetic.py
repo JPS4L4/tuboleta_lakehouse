@@ -14,6 +14,16 @@ Qué se genera:
     (TTL del lock vencido) y rechazos por UNIQUE (silla ya vendida).
   * "Suciedad" intencional en las tablas de ventas, intentos y usuarios para que
     Silver tenga trabajo real (ver `_ensuciar_transaccional`).
+
+Comportamiento latente (para los modelos multivariados):
+  * Cada usuario tiene un perfil oculto (`PERFILES`) que decide su segmento, su
+    canal preferido, la zona a la que va, cuántas veces compra, cuánto antes del
+    evento compra, a qué hora y qué tan rápido paga. Así las variables del
+    cliente quedan correlacionadas, como en datos reales.
+  * La probabilidad de abandono depende del precio, el canal, la hora, el día de
+    apertura, la espera en fila y el perfil (`_peso_abandono`).
+  * El perfil nunca llega a Bronze: se guarda aparte en `lakehouse/validacion`
+    como verdad de terreno para validar la segmentación.
 """
 from __future__ import annotations
 
@@ -76,7 +86,39 @@ FILAS_SIN_CLAVE = 40  # filas con una clave de negocio nula
 TASA_DUPLICADOS_USUARIOS = 0.005
 TASA_ESPACIOS_USUARIOS = 0.010
 
-TASA_PAGO_TARDIO = 0.08  # fracción de ventas pagadas en el último tramo del TTL
+# --- Perfiles latentes de cliente -----------------------------------------
+# Orden de las listas: segmento -> SEGMENTOS, canal -> CANALES, zona -> ZONAS.
+#   peso: fracción de la población       frecuencia: tasa relativa de compra
+#   apertura: 1 = compra el día que abren las ventas, 0 = a última hora
+#   noche: multiplicador de las horas 18-05 en canales digitales
+#   pago_escala / tardio: velocidad de pago (gamma) y fracción de pagos al límite del TTL
+#   abandono: efecto en el log-odds de abandonar un intento
+PERFILES = {
+    "fiel_nocturno": dict(peso=0.18, segmento=[0.15, 0.35, 0.00, 0.00, 0.50], canal=[0.75, 0.20, 0.05],
+                          zona=[0.3, 0.6, 1.6, 1.3], frecuencia=3.0, apertura=0.85, noche=2.2,
+                          pago_escala=30.0, tardio=0.03, abandono=-0.6),
+    "cazador_ofertas": dict(peso=0.22, segmento=[0.25, 0.20, 0.55, 0.00, 0.00], canal=[0.50, 0.45, 0.05],
+                            zona=[0.15, 0.4, 1.2, 2.2], frecuencia=1.2, apertura=0.70, noche=1.3,
+                            pago_escala=70.0, tardio=0.12, abandono=0.7),
+    "premium": dict(peso=0.12, segmento=[0.35, 0.10, 0.00, 0.55, 0.00], canal=[0.25, 0.55, 0.20],
+                    zona=[3.5, 1.8, 0.3, 0.15], frecuencia=1.5, apertura=0.40, noche=0.6,
+                    pago_escala=90.0, tardio=0.10, abandono=-0.3),
+    "ocasional": dict(peso=0.35, segmento=[0.85, 0.00, 0.10, 0.00, 0.05], canal=[0.35, 0.50, 0.15],
+                      zona=[0.5, 1.2, 1.0, 1.0], frecuencia=0.6, apertura=0.15, noche=1.0,
+                      pago_escala=60.0, tardio=0.08, abandono=0.4),
+    "tradicional_taquilla": dict(peso=0.13, segmento=[0.70, 0.20, 0.00, 0.10, 0.00], canal=[0.10, 0.15, 0.75],
+                                 zona=[0.5, 1.6, 1.3, 0.8], frecuencia=1.0, apertura=0.30, noche=0.8,
+                                 pago_escala=45.0, tardio=0.05, abandono=-0.2),
+}
+NOMBRES_PERFIL = list(PERFILES)
+
+# Log-odds de abandono por atributo del intento (ver `_peso_abandono`).
+EFECTO_ABANDONO_PRECIO = 0.6  # por unidad de log(precio_base / 90.000)
+EFECTO_ABANDONO_CANAL = {"C-APP": 0.0, "C-WEB": 0.35, "C-TAQ": -0.8}
+EFECTO_ABANDONO_MADRUGADA = 0.5  # 00:00-05:59
+EFECTO_ABANDONO_NOCHE = 0.2  # 18:00-23:59
+EFECTO_ABANDONO_APERTURA = 0.4  # primer día de ventas (saturación)
+FACTOR_FILA_ABANDONO = np.exp(0.5)  # quien abandona esperó ~1,65 veces más en la fila
 
 
 # --- Catálogos ----------------------------------------------------------
@@ -127,14 +169,30 @@ def generar_sillas() -> pd.DataFrame:
     return sillas
 
 
+def _parametro(nombre: str) -> np.ndarray:
+    """Vector con el parámetro `nombre` de cada perfil, en el orden de NOMBRES_PERFIL."""
+    return np.array([PERFILES[p][nombre] for p in NOMBRES_PERFIL])
+
+
 def generar_usuarios(rng: np.random.Generator) -> pd.DataFrame:
-    """Devuelve la población de usuarios con segmento y canal preferido."""
-    segmentos = rng.choice(list(SEGMENTOS), config.N_USUARIOS, p=[v[0] for v in SEGMENTOS.values()])
-    canal_pref = rng.choice([c[1] for c in CANALES], config.N_USUARIOS, p=PESO_CANAL)
+    """Devuelve la población de usuarios con segmento, canal preferido y perfil latente.
+
+    El segmento y el canal preferido se sortean según el perfil, así que están
+    correlacionados con él. La columna `perfil_idx` es oculta: `generar` la retira
+    antes de Bronze.
+    """
+    perfil = rng.choice(len(NOMBRES_PERFIL), config.N_USUARIOS, p=_parametro("peso"))
+    segmentos = np.empty(config.N_USUARIOS, dtype=object)
+    canal_pref = np.empty(config.N_USUARIOS, dtype=object)
+    for i, nombre in enumerate(NOMBRES_PERFIL):
+        mask = perfil == i
+        segmentos[mask] = rng.choice(list(SEGMENTOS), int(mask.sum()), p=PERFILES[nombre]["segmento"])
+        canal_pref[mask] = rng.choice([c[1] for c in CANALES], int(mask.sum()), p=PERFILES[nombre]["canal"])
     return pd.DataFrame({
         "usuario_id": [f"U-{i:06d}" for i in range(1, config.N_USUARIOS + 1)],
         "segmento": segmentos,
         "canal_preferido": canal_pref,
+        "perfil_idx": perfil,
     })
 
 
@@ -155,10 +213,13 @@ def _precio_vigente(zonas: pd.DataFrame, zona_id: np.ndarray, fecha: pd.Series) 
     return precio
 
 
-def _pesos_dias(inicio: pd.Timestamp, n_dias: int) -> np.ndarray:
-    """Peso de venta por día: pico el día de apertura, repunte final y fines de semana."""
+def _pesos_dias(inicio: pd.Timestamp, n_dias: int, apertura: float) -> np.ndarray:
+    """Peso de venta por día: pico el día de apertura, repunte final y fines de semana.
+
+    `apertura` (0 a 1) reparte el peso entre el pico de apertura y el repunte final.
+    """
     k = np.arange(n_dias)
-    peso = 0.6 + 6.0 * np.exp(-k / 2.5) + 3.0 * np.exp(-(n_dias - 1 - k) / 4.0)
+    peso = 0.6 + 12.0 * apertura * np.exp(-k / 2.5) + 6.0 * (1 - apertura) * np.exp(-(n_dias - 1 - k) / 4.0)
     fin_semana = pd.date_range(inicio, periods=n_dias).dayofweek >= 5
     peso = np.where(fin_semana, peso * 1.3, peso)
     return peso / peso.sum()
@@ -176,25 +237,48 @@ def _elegir_sillas(rng: np.random.Generator, sillas: pd.DataFrame, ocupacion: fl
 
 
 def _momento_compra(rng: np.random.Generator, inicio: pd.Timestamp, n_dias: int,
-                    canal_idx: np.ndarray) -> tuple[np.ndarray, pd.Series]:
-    """Genera la fecha-hora de cada compra y devuelve también el día relativo a la apertura."""
+                    canal_idx: np.ndarray, perfil_idx: np.ndarray) -> tuple[np.ndarray, pd.Series]:
+    """Genera la fecha-hora de cada compra y devuelve también el día relativo a la apertura.
+
+    El día depende de la `apertura` del perfil; la hora, del canal y de la
+    preferencia nocturna del perfil (la taquilla mantiene su horario de oficina).
+    """
     n = len(canal_idx)
-    dia = rng.choice(n_dias, n, p=_pesos_dias(inicio, n_dias))
+    dia = np.zeros(n, dtype=np.int64)
     hora = np.zeros(n, dtype=np.int64)
-    for i, pesos in enumerate(PESO_HORA):
-        mask = canal_idx == i
-        hora[mask] = rng.choice(24, int(mask.sum()), p=pesos / pesos.sum())
+    nocturnas = np.r_[0:6, 18:24]
+    for p, nombre in enumerate(NOMBRES_PERFIL):
+        mask_p = perfil_idx == p
+        dia[mask_p] = rng.choice(n_dias, int(mask_p.sum()), p=_pesos_dias(inicio, n_dias, PERFILES[nombre]["apertura"]))
+        for c, base in enumerate(PESO_HORA):
+            mask = mask_p & (canal_idx == c)
+            pesos = base.copy()
+            pesos[nocturnas] *= PERFILES[nombre]["noche"]
+            hora[mask] = rng.choice(24, int(mask.sum()), p=pesos / pesos.sum())
     hora = np.where(dia == 0, np.maximum(hora, HORA_APERTURA_VENTAS), hora)
     segundos = dia * 86400 + hora * 3600 + rng.integers(0, 3600, n)
     momento = inicio.to_datetime64() + segundos.astype("timedelta64[s]")
     return pd.Series(momento), dia
 
 
-def _tiempo_hasta_pago(rng: np.random.Generator, n: int) -> np.ndarray:
-    """Segundos entre el lock y el pago; una minoría paga en el último tramo del TTL."""
-    normal = np.minimum(np.round(rng.gamma(3.0, 55.0, n) + 20), config.UMBRAL_PAGO_TARDIO_SEG - 1)
+def _tiempo_hasta_pago(rng: np.random.Generator, perfil_idx: np.ndarray) -> np.ndarray:
+    """Segundos entre el lock y el pago; la velocidad y los pagos al límite dependen del perfil."""
+    n = len(perfil_idx)
+    normal = np.minimum(np.round(rng.gamma(3.0, _parametro("pago_escala")[perfil_idx]) + 20),
+                        config.UMBRAL_PAGO_TARDIO_SEG - 1)
     tardio = rng.integers(config.UMBRAL_PAGO_TARDIO_SEG, config.TTL_LOCK_SEG, n)
-    return np.where(rng.random(n) < TASA_PAGO_TARDIO, tardio, normal).astype(np.int64)
+    return np.where(rng.random(n) < _parametro("tardio")[perfil_idx], tardio, normal).astype(np.int64)
+
+
+def _elegir_compradores(rng: np.random.Generator, perfil_usuario: np.ndarray, zona_id: np.ndarray) -> np.ndarray:
+    """Elige el comprador de cada silla según la frecuencia del perfil y su afinidad con la zona."""
+    pos_usuario = np.zeros(len(zona_id), dtype=np.int64)
+    frecuencia = _parametro("frecuencia")[perfil_usuario]
+    for z, (zona, *_) in enumerate(ZONAS):
+        mask = zona_id == zona
+        pesos = frecuencia * _parametro("zona")[perfil_usuario, z]
+        pos_usuario[mask] = rng.choice(len(perfil_usuario), int(mask.sum()), p=pesos / pesos.sum())
+    return pos_usuario
 
 
 def _descuento(rng: np.random.Generator, precio_base: np.ndarray, segmento: np.ndarray,
@@ -211,24 +295,27 @@ def _descuento(rng: np.random.Generator, precio_base: np.ndarray, segmento: np.n
 def generar_ventas(rng: np.random.Generator, cat: dict[str, pd.DataFrame]) -> pd.DataFrame:
     """Genera las compras confirmadas limpias (una por silla y evento).
 
-    Devuelve además las columnas auxiliares `zona_id`, `dia_venta` y
-    `fecha_intento` que se usan para construir los intentos de compra.
+    Devuelve además las columnas auxiliares `zona_id`, `dia_venta`,
+    `fecha_intento`, `precio_base` y `perfil_idx` que se usan para construir los
+    intentos de compra.
     """
     sillas, usuarios, zonas = cat["sillas"], cat["usuarios"], cat["zonas"]
     pref = usuarios["canal_preferido"].map({c[1]: i for i, c in enumerate(CANALES)}).to_numpy()
+    perfil_usuario = usuarios["perfil_idx"].to_numpy()
     partes = []
     for evento_id, _, _, fecha_evento, inicio_ventas, ocupacion, _ in EVENTOS:
         inicio = pd.Timestamp(inicio_ventas)
         n_dias = (pd.Timestamp(fecha_evento) - inicio).days
         pos_silla = _elegir_sillas(rng, sillas, ocupacion)
         n = len(pos_silla)
-        pos_usuario = rng.integers(0, config.N_USUARIOS, n)
-        canal_idx = np.where(rng.random(n) < 0.8, pref[pos_usuario], rng.choice(3, n, p=PESO_CANAL))
-        fecha_compra, dia = _momento_compra(rng, inicio, n_dias, canal_idx)
         zona_id = sillas["zona_id"].to_numpy()[pos_silla]
+        pos_usuario = _elegir_compradores(rng, perfil_usuario, zona_id)
+        perfil_idx = perfil_usuario[pos_usuario]
+        canal_idx = np.where(rng.random(n) < 0.8, pref[pos_usuario], rng.choice(3, n, p=PESO_CANAL))
+        fecha_compra, dia = _momento_compra(rng, inicio, n_dias, canal_idx, perfil_idx)
         precio_base = _precio_vigente(zonas, zona_id, fecha_compra)
         descuento = _descuento(rng, precio_base, usuarios["segmento"].to_numpy()[pos_usuario], dia)
-        tiempo_pago = _tiempo_hasta_pago(rng, n)
+        tiempo_pago = _tiempo_hasta_pago(rng, perfil_idx)
         partes.append(pd.DataFrame({
             "silla_id": sillas["silla_id"].to_numpy()[pos_silla],
             "evento_id": evento_id,
@@ -241,6 +328,8 @@ def generar_ventas(rng: np.random.Generator, cat: dict[str, pd.DataFrame]) -> pd
             "zona_id": zona_id,
             "dia_venta": dia,
             "fecha_intento": fecha_compra - pd.to_timedelta(tiempo_pago, unit="s"),
+            "precio_base": precio_base,
+            "perfil_idx": perfil_idx,
         }))
     ventas = pd.concat(partes, ignore_index=True).sort_values("fecha_compra", ignore_index=True)
     ventas.insert(0, "compra_id", [f"C-{i:07d}" for i in range(1, len(ventas) + 1)])
@@ -248,20 +337,48 @@ def generar_ventas(rng: np.random.Generator, cat: dict[str, pd.DataFrame]) -> pd
 
 
 # --- Intentos de compra --------------------------------------------------
-def _intentos_abandono(rng: np.random.Generator, ventas: pd.DataFrame, sillas: pd.DataFrame,
-                       usuarios: pd.DataFrame) -> pd.DataFrame:
-    """Intentos cuyo lock venció sin pago: la silla volvió al inventario."""
-    base = ventas.iloc[rng.integers(0, len(ventas), int(len(ventas) * config.TASA_ABANDONO))].reset_index(drop=True)
+def _peso_abandono(ventas: pd.DataFrame) -> np.ndarray:
+    """Peso relativo de abandono de cada venta: exp(log-odds del abandono).
+
+    Al muestrear los abandonos con estos pesos, el cociente de densidades entre
+    abandonos y compras es exp(log-odds): una regresión logística ABANDONO vs.
+    COMPRA recupera estos efectos (salvo la constante). La espera en fila se
+    agrega después, en `generar_intentos`.
+    """
+    hora = ventas["fecha_intento"].dt.hour.to_numpy()
+    log_odds = (
+        EFECTO_ABANDONO_PRECIO * np.log(ventas["precio_base"].to_numpy() / 90_000)
+        + ventas["canal_id"].map(EFECTO_ABANDONO_CANAL).to_numpy()
+        + np.where(hora < 6, EFECTO_ABANDONO_MADRUGADA, 0.0)
+        + np.where(hora >= 18, EFECTO_ABANDONO_NOCHE, 0.0)
+        + np.where(ventas["dia_venta"].to_numpy() == 0, EFECTO_ABANDONO_APERTURA, 0.0)
+        + _parametro("abandono")[ventas["perfil_idx"].to_numpy()]
+    )
+    return np.exp(log_odds)
+
+
+def _intentos_abandono(rng: np.random.Generator, ventas: pd.DataFrame, sillas: pd.DataFrame) -> pd.DataFrame:
+    """Intentos cuyo lock venció sin pago: la silla volvió al inventario.
+
+    Cada abandono es de un cliente que luego compró: bloqueó otra silla del mismo
+    evento y zona, dejó vencer el TTL y volvió a intentarlo entre 10 y 25 minutos
+    después (nunca antes de que abrieran las ventas).
+    """
+    peso = _peso_abandono(ventas)
+    n = int(len(ventas) * config.TASA_ABANDONO)
+    base = ventas.iloc[rng.choice(len(ventas), n, p=peso / peso.sum())].reset_index(drop=True)
     silla = np.empty(len(base), dtype=object)
     for zona_id, *_ in ZONAS:
         mask = (base["zona_id"] == zona_id).to_numpy()
         silla[mask] = rng.choice(sillas.loc[sillas["zona_id"] == zona_id, "silla_id"].to_numpy(), int(mask.sum()))
+    apertura = base["evento_id"].map({e[0]: pd.Timestamp(e[4]) + pd.Timedelta(hours=HORA_APERTURA_VENTAS) for e in EVENTOS})
+    antes = pd.to_timedelta(config.TTL_LOCK_SEG + rng.integers(0, 900, len(base)), unit="s")
     return pd.DataFrame({
         "silla_id": silla,
         "evento_id": base["evento_id"],
-        "usuario_id": rng.choice(usuarios["usuario_id"].to_numpy(), len(base)),
+        "usuario_id": base["usuario_id"],
         "canal_id": base["canal_id"],
-        "fecha_intento": base["fecha_intento"] + pd.to_timedelta(rng.integers(0, 3600, len(base)), unit="s"),
+        "fecha_intento": np.maximum(base["fecha_intento"] - antes, apertura),
         "resultado": "ABANDONO",
         "compra_id": None,
     })
@@ -288,13 +405,14 @@ def generar_intentos(rng: np.random.Generator, ventas: pd.DataFrame, cat: dict[s
     compras["resultado"] = "COMPRA"
     intentos = pd.concat([
         compras,
-        _intentos_abandono(rng, ventas, cat["sillas"], cat["usuarios"]),
+        _intentos_abandono(rng, ventas, cat["sillas"]),
         _intentos_rechazo(rng, ventas, cat["usuarios"]),
     ], ignore_index=True).sort_values("fecha_intento", ignore_index=True)
 
     inicio = intentos["evento_id"].map({e[0]: pd.Timestamp(e[4]) for e in EVENTOS})
     dias = (intentos["fecha_intento"] - inicio).dt.total_seconds() / 86400
     espera = rng.lognormal(np.log(45), 0.8, len(intentos)) * (1 + 3 * np.exp(-dias / 2.5))
+    espera = np.where(intentos["resultado"] == "ABANDONO", espera * FACTOR_FILA_ABANDONO, espera)
     intentos["tiempo_en_fila_seg"] = np.round(espera).astype(np.int64)
     intentos.insert(0, "intento_id", [f"I-{i:07d}" for i in range(1, len(intentos) + 1)])
     return intentos
@@ -345,6 +463,17 @@ def _ensuciar_usuarios(rng: np.random.Generator, usuarios: pd.DataFrame) -> pd.D
     return sucio.iloc[rng.permutation(len(sucio))].reset_index(drop=True)
 
 
+# --- Verdad de terreno ---------------------------------------------------
+def escribir_verdad_perfiles(usuarios: pd.DataFrame) -> None:
+    """Guarda el perfil latente de cada usuario fuera del lakehouse, solo para validar modelos."""
+    config.VALIDACION.mkdir(parents=True, exist_ok=True)
+    verdad = pd.DataFrame({
+        "usuario_id": usuarios["usuario_id"],
+        "perfil_latente": np.array(NOMBRES_PERFIL)[usuarios["perfil_idx"].to_numpy()],
+    })
+    verdad.to_parquet(config.VALIDACION / "perfil_latente.parquet", index=False)
+
+
 # --- Punto de entrada ----------------------------------------------------
 def generar() -> dict[str, pd.DataFrame]:
     """Genera todas las tablas operacionales tal como llegarían a Bronze."""
@@ -363,8 +492,9 @@ def generar() -> dict[str, pd.DataFrame]:
                       "precio_pagado", "descuento_aplicado", "tiempo_hasta_pago_seg"]]
     intentos = intentos[["intento_id", "silla_id", "evento_id", "usuario_id", "canal_id", "fecha_intento",
                          "resultado", "tiempo_en_fila_seg", "compra_id"]]
+    escribir_verdad_perfiles(cat["usuarios"])
     tablas = dict(cat)
-    tablas["usuarios"] = _ensuciar_usuarios(rng, cat["usuarios"])
+    tablas["usuarios"] = _ensuciar_usuarios(rng, cat["usuarios"].drop(columns="perfil_idx"))
     tablas["compras_confirmadas"] = _ensuciar_transaccional(
         rng, compras, "fecha_compra", ["compra_id", "silla_id", "evento_id", "usuario_id"],
         ["compra_id", "silla_id", "evento_id"])

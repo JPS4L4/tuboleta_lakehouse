@@ -1,6 +1,6 @@
 # Resultados de las consultas analíticas
 
-Generado por `scripts/analyze.py` (2026-10-20 11:08) sobre el esquema en estrella de Gold.
+Generado por `scripts/analyze.py` (2026-10-28 11:16) sobre el esquema en estrella de Gold.
 
 ## 1. Ingresos y boletas por evento y mes
 
@@ -8,21 +8,21 @@ Generado por `scripts/analyze.py` (2026-10-20 11:08) sobre el esquema en estrell
 
 | nombre_evento | anio | mes | mes_nombre | boletas | ingresos |
 |---|---|---|---|---|---|
-| Concierto Noche Latina | 2026 | 2 | febrero | 12.007 | 1.210.903.000 |
-| Concierto Noche Latina | 2026 | 3 | marzo | 13.193 | 1.358.401.000 |
-| Concierto Noche Latina | 2026 | 4 | abril | 14.220 | 1.460.951.000 |
-| Clásico Paisa Nacional vs Medellín | 2026 | 5 | mayo | 15.149 | 1.555.757.000 |
-| Clásico Paisa Nacional vs Medellín | 2026 | 6 | junio | 15.188 | 1.579.414.500 |
-| Clásico Paisa Nacional vs Medellín | 2026 | 7 | julio | 13.288 | 1.470.511.900 |
-| Festival Sonidos del Valle | 2026 | 6 | junio | 18.063 | 1.850.558.000 |
-| Festival Sonidos del Valle | 2026 | 7 | julio | 14.108 | 1.546.309.700 |
-| Festival Sonidos del Valle | 2026 | 8 | agosto | 10.284 | 1.130.216.500 |
-| Gira Urbana Medellín | 2026 | 7 | julio | 15.466 | 1.666.940.100 |
-| Gira Urbana Medellín | 2026 | 8 | agosto | 12.689 | 1.386.978.000 |
-| Gira Urbana Medellín | 2026 | 9 | septiembre | 11.914 | 1.286.744.700 |
-| Final del Fútbol Colombiano | 2026 | 8 | agosto | 4.296 | 463.376.500 |
-| Final del Fútbol Colombiano | 2026 | 9 | septiembre | 22.125 | 2.402.970.800 |
-| Final del Fútbol Colombiano | 2026 | 10 | octubre | 16.246 | 1.756.091.100 |
+| Concierto Noche Latina | 2026 | 2 | febrero | 13.567 | 1.283.939.000 |
+| Concierto Noche Latina | 2026 | 3 | marzo | 13.108 | 1.333.649.000 |
+| Concierto Noche Latina | 2026 | 4 | abril | 12.759 | 1.369.809.000 |
+| Clásico Paisa Nacional vs Medellín | 2026 | 5 | mayo | 17.058 | 1.641.500.000 |
+| Clásico Paisa Nacional vs Medellín | 2026 | 6 | junio | 14.966 | 1.547.518.500 |
+| Clásico Paisa Nacional vs Medellín | 2026 | 7 | julio | 11.814 | 1.383.595.800 |
+| Festival Sonidos del Valle | 2026 | 6 | junio | 19.426 | 1.906.164.500 |
+| Festival Sonidos del Valle | 2026 | 7 | julio | 13.371 | 1.478.479.300 |
+| Festival Sonidos del Valle | 2026 | 8 | agosto | 8.778 | 1.039.465.800 |
+| Gira Urbana Medellín | 2026 | 7 | julio | 17.024 | 1.746.843.700 |
+| Gira Urbana Medellín | 2026 | 8 | agosto | 12.223 | 1.351.182.000 |
+| Gira Urbana Medellín | 2026 | 9 | septiembre | 10.304 | 1.210.290.100 |
+| Final del Fútbol Colombiano | 2026 | 8 | agosto | 4.998 | 493.055.700 |
+| Final del Fútbol Colombiano | 2026 | 9 | septiembre | 22.584 | 2.377.871.200 |
+| Final del Fútbol Colombiano | 2026 | 10 | octubre | 14.345 | 1.665.531.700 |
 
 ## 2. Ocupación e ingresos por evento y zona
 
@@ -30,26 +30,26 @@ Generado por `scripts/analyze.py` (2026-10-20 11:08) sobre el esquema en estrell
 
 | nombre_evento | nombre_zona | capacidad_zona | vendidas | ocupacion_pct | ingresos |
 |---|---|---|---|---|---|
-| Concierto Noche Latina | Occidental | 12.000 | 10.332 | 86,10 | 1.503.637.500 |
-| Concierto Noche Latina | Norte | 14.000 | 12.387 | 88,48 | 1.080.391.500 |
-| Concierto Noche Latina | General | 16.000 | 14.126 | 88,29 | 821.901.000 |
-| Concierto Noche Latina | VIP | 3.000 | 2.575 | 85,83 | 624.325.000 |
-| Clásico Paisa Nacional vs Medellín | Occidental | 12.000 | 12.000 | 100,00 | 1.798.896.900 |
-| Clásico Paisa Nacional vs Medellín | Norte | 14.000 | 13.336 | 95,26 | 1.163.808.000 |
-| Clásico Paisa Nacional vs Medellín | General | 16.000 | 15.289 | 95,56 | 888.825.000 |
-| Clásico Paisa Nacional vs Medellín | VIP | 3.000 | 3.000 | 100,00 | 754.153.500 |
-| Festival Sonidos del Valle | Occidental | 12.000 | 11.568 | 96,40 | 1.779.518.200 |
-| Festival Sonidos del Valle | Norte | 14.000 | 13.209 | 94,35 | 1.152.144.000 |
-| Festival Sonidos del Valle | General | 16.000 | 14.855 | 92,84 | 863.484.000 |
-| Festival Sonidos del Valle | VIP | 3.000 | 2.823 | 94,10 | 731.938.000 |
-| Gira Urbana Medellín | Occidental | 12.000 | 10.527 | 87,73 | 1.684.002.800 |
-| Gira Urbana Medellín | Norte | 14.000 | 12.205 | 87,18 | 1.064.007.000 |
-| Gira Urbana Medellín | General | 16.000 | 14.599 | 91,24 | 848.847.000 |
-| Gira Urbana Medellín | VIP | 3.000 | 2.738 | 91,27 | 743.806.000 |
-| Final del Fútbol Colombiano | Occidental | 12.000 | 11.489 | 95,74 | 1.835.284.900 |
-| Final del Fútbol Colombiano | Norte | 14.000 | 13.377 | 95,55 | 1.166.809.500 |
-| Final del Fútbol Colombiano | General | 16.000 | 15.062 | 94,14 | 876.048.000 |
-| Final del Fútbol Colombiano | VIP | 3.000 | 2.739 | 91,30 | 744.296.000 |
+| Concierto Noche Latina | Occidental | 12.000 | 10.321 | 86,01 | 1.493.235.000 |
+| Concierto Noche Latina | Norte | 14.000 | 12.566 | 89,76 | 1.085.265.000 |
+| Concierto Noche Latina | General | 16.000 | 14.032 | 87,70 | 806.172.000 |
+| Concierto Noche Latina | VIP | 3.000 | 2.515 | 83,83 | 602.725.000 |
+| Clásico Paisa Nacional vs Medellín | Occidental | 12.000 | 11.676 | 97,30 | 1.745.617.300 |
+| Clásico Paisa Nacional vs Medellín | Norte | 14.000 | 14.000 | 100,00 | 1.208.074.500 |
+| Clásico Paisa Nacional vs Medellín | General | 16.000 | 15.162 | 94,76 | 870.666.000 |
+| Clásico Paisa Nacional vs Medellín | VIP | 3.000 | 3.000 | 100,00 | 748.256.500 |
+| Festival Sonidos del Valle | Occidental | 12.000 | 11.448 | 95,40 | 1.755.351.100 |
+| Festival Sonidos del Valle | Norte | 14.000 | 12.942 | 92,44 | 1.118.173.500 |
+| Festival Sonidos del Valle | General | 16.000 | 14.355 | 89,72 | 824.337.000 |
+| Festival Sonidos del Valle | VIP | 3.000 | 2.830 | 94,33 | 726.248.000 |
+| Gira Urbana Medellín | Occidental | 12.000 | 10.739 | 89,49 | 1.710.689.800 |
+| Gira Urbana Medellín | Norte | 14.000 | 12.227 | 87,34 | 1.055.601.000 |
+| Gira Urbana Medellín | General | 16.000 | 13.788 | 86,18 | 791.583.000 |
+| Gira Urbana Medellín | VIP | 3.000 | 2.797 | 93,23 | 750.442.000 |
+| Final del Fútbol Colombiano | Occidental | 12.000 | 11.249 | 93,74 | 1.790.140.100 |
+| Final del Fútbol Colombiano | Norte | 14.000 | 12.800 | 91,43 | 1.105.582.500 |
+| Final del Fútbol Colombiano | General | 16.000 | 14.975 | 93,59 | 860.166.000 |
+| Final del Fútbol Colombiano | VIP | 3.000 | 2.903 | 96,77 | 780.570.000 |
 
 ## 3. Volumen, ingresos y ticket promedio por canal
 
@@ -57,10 +57,10 @@ Generado por `scripts/analyze.py` (2026-10-20 11:08) sobre el esquema en estrell
 
 | canal | boletas | boletas_pct | ingresos | ticket_promedio | descuento_promedio |
 |---|---|---|---|---|---|
-| app | 92.066 | 44,21 | 9.779.126.100 | 106.219 | 3.371 |
-| web | 82.058 | 39,41 | 8.716.875.500 | 106.228 | 3.333 |
-| taquilla | 31.011 | 14,89 | 3.301.901.100 | 106.475 | 3.378 |
-| DESCONOCIDO | 3.101 | 1,49 | 328.221.100 | 105.844 | 3.442 |
+| app | 99.940 | 48,44 | 9.842.735.200 | 98.486 | 4.313 |
+| web | 71.396 | 34,60 | 7.894.226.400 | 110.570 | 4.532 |
+| taquilla | 31.935 | 15,48 | 3.769.646.000 | 118.041 | 3.616 |
+| DESCONOCIDO | 3.054 | 1,48 | 322.287.700 | 105.530 | 4.254 |
 
 ## 4. Distribución por franja horaria y día de la semana
 
@@ -68,10 +68,10 @@ Generado por `scripts/analyze.py` (2026-10-20 11:08) sobre el esquema en estrell
 
 | franja_horaria | boletas | pct | lunes | martes | miercoles | jueves | viernes | sabado | domingo |
 |---|---|---|---|---|---|---|---|---|---|
-| madrugada | 7.586 | 3,64 | 723 | 1.364 | 1.211 | 1.197 | 1.212 | 930 | 949 |
-| mañana | 53.826 | 25,85 | 10.664 | 8.525 | 7.772 | 7.571 | 7.675 | 5.859 | 5.760 |
-| tarde | 74.651 | 35,85 | 13.943 | 12.065 | 10.807 | 10.489 | 10.639 | 8.365 | 8.343 |
-| noche | 72.173 | 34,66 | 13.605 | 11.415 | 10.625 | 10.173 | 10.351 | 8.123 | 7.881 |
+| madrugada | 8.364 | 4,05 | 788 | 1.630 | 1.411 | 1.210 | 1.229 | 1.058 | 1.038 |
+| mañana | 47.635 | 23,09 | 10.034 | 7.583 | 6.759 | 6.547 | 6.585 | 5.067 | 5.060 |
+| tarde | 66.834 | 32,39 | 12.653 | 10.708 | 9.745 | 9.548 | 9.528 | 7.384 | 7.268 |
+| noche | 83.492 | 40,47 | 17.430 | 14.081 | 12.109 | 11.232 | 10.843 | 9.021 | 8.776 |
 
 ## 5a. Embudo de conversión por evento
 
@@ -79,11 +79,11 @@ Generado por `scripts/analyze.py` (2026-10-20 11:08) sobre el esquema en estrell
 
 | evento | intentos | compras | abandonos | rechazos_unique | conversion_pct | abandono_pct | rechazo_unique_pct | pago_tardio_pct |
 |---|---|---|---|---|---|---|---|---|
-| Clásico Paisa Nacional vs Medellín | 54.577 | 43.625 | 7.468 | 3.484 | 79,93 | 13,68 | 6,38 | 7,73 |
-| Festival Sonidos del Valle | 53.295 | 42.455 | 7.373 | 3.467 | 79,66 | 13,83 | 6,51 | 8,12 |
-| Final del Fútbol Colombiano | 53.161 | 42.667 | 7.174 | 3.320 | 80,26 | 13,49 | 6,25 | 8,07 |
-| Gira Urbana Medellín | 49.947 | 40.069 | 6.752 | 3.126 | 80,22 | 13,52 | 6,26 | 7,80 |
-| Concierto Noche Latina | 49.314 | 39.420 | 6.633 | 3.261 | 79,94 | 13,45 | 6,61 | 8,19 |
+| Clásico Paisa Nacional vs Medellín | 54.738 | 43.838 | 7.431 | 3.469 | 80,09 | 13,58 | 6,34 | 6,84 |
+| Final del Fútbol Colombiano | 52.543 | 41.927 | 7.258 | 3.358 | 79,80 | 13,81 | 6,39 | 6,91 |
+| Festival Sonidos del Valle | 52.031 | 41.575 | 7.091 | 3.365 | 79,90 | 13,63 | 6,47 | 6,95 |
+| Gira Urbana Medellín | 49.414 | 39.551 | 6.692 | 3.171 | 80,04 | 13,54 | 6,42 | 6,74 |
+| Concierto Noche Latina | 49.180 | 39.434 | 6.603 | 3.143 | 80,18 | 13,43 | 6,39 | 6,65 |
 
 ## 5b. Embudo de conversión por canal
 
@@ -91,10 +91,10 @@ Generado por `scripts/analyze.py` (2026-10-20 11:08) sobre el esquema en estrell
 
 | canal | intentos | compras | abandonos | rechazos_unique | conversion_pct | abandono_pct | rechazo_unique_pct | pago_tardio_pct |
 |---|---|---|---|---|---|---|---|---|
-| app | 115.157 | 92.094 | 15.715 | 7.348 | 79,97 | 13,65 | 6,38 | 7,97 |
-| web | 102.536 | 82.024 | 13.885 | 6.627 | 80,00 | 13,54 | 6,46 | 7,95 |
-| taquilla | 38.695 | 30.991 | 5.241 | 2.463 | 80,09 | 13,54 | 6,37 | 8,11 |
-| DESCONOCIDO | 3.906 | 3.127 | 559 | 220 | 80,06 | 14,31 | 5,63 | 7,80 |
+| app | 121.791 | 99.873 | 14.524 | 7.394 | 82,00 | 11,93 | 6,07 | 6,11 |
+| web | 95.875 | 71.420 | 18.017 | 6.438 | 74,49 | 18,79 | 6,71 | 7,84 |
+| taquilla | 36.358 | 31.911 | 2.010 | 2.437 | 87,77 | 5,53 | 6,70 | 6,77 |
+| DESCONOCIDO | 3.882 | 3.121 | 524 | 237 | 80,40 | 13,50 | 6,11 | 6,76 |
 
 ## 6. SCD Tipo 2: ingresos VIP por versión de precio
 
@@ -102,8 +102,8 @@ Generado por `scripts/analyze.py` (2026-10-20 11:08) sobre el esquema en estrell
 
 | zona_sk | nombre_zona | precio_base | valido_desde | valido_hasta | boletas | ingresos | ticket_promedio | descuento_promedio |
 |---|---|---|---|---|---|---|---|---|
-| 1 | VIP | 250.000 | 2026-01-01 | 2026-06-30 | 5.834 | 1.411.662.500 | 241.972 | 8.028 |
-| 2 | VIP | 280.000 | 2026-07-01 | 9999-12-31 | 8.041 | 2.186.856.000 | 271.963 | 8.037 |
+| 1 | VIP | 250.000 | 2026-01-01 | 2026-06-30 | 5.657 | 1.353.387.500 | 239.241 | 10.759 |
+| 2 | VIP | 280.000 | 2026-07-01 | 9999-12-31 | 8.388 | 2.254.854.000 | 268.819 | 11.181 |
 
 ## 7. Tiempo hasta el pago por zona (promedio, mediana y p95)
 
@@ -111,10 +111,10 @@ Generado por `scripts/analyze.py` (2026-10-20 11:08) sobre el esquema en estrell
 
 | nombre_zona | boletas | promedio_seg | mediana_seg | p95_seg | pago_tardio_pct |
 |---|---|---|---|---|---|
-| General | 73.931 | 212,90 | 177,00 | 526,00 | 8,12 |
-| Occidental | 55.916 | 212,80 | 178,00 | 524,00 | 7,97 |
-| VIP | 13.875 | 212,30 | 177,00 | 528,00 | 8,02 |
-| Norte | 64.514 | 211,50 | 176,00 | 523,00 | 7,82 |
+| VIP | 14.045 | 255,50 | 219,00 | 528,00 | 8,70 |
+| Occidental | 55.433 | 213,80 | 170,00 | 515,00 | 7,12 |
+| General | 72.312 | 192,00 | 147,00 | 514,00 | 7,05 |
+| Norte | 64.535 | 175,90 | 134,00 | 499,00 | 5,91 |
 
 ## 8. Ventas en el día de apertura
 
@@ -122,11 +122,11 @@ Generado por `scripts/analyze.py` (2026-10-20 11:08) sobre el esquema en estrell
 
 | nombre_evento | inicio_ventas | boletas | primer_dia | primer_dia_pct | tres_dias_pct | ingresos_primer_dia |
 |---|---|---|---|---|---|---|
-| Concierto Noche Latina | 2026-02-23 | 39.420 | 3.930 | 9,97 | 21,42 | 399.073.000 |
-| Clásico Paisa Nacional vs Medellín | 2026-05-25 | 43.625 | 4.510 | 10,34 | 22,79 | 459.802.500 |
-| Festival Sonidos del Valle | 2026-06-15 | 42.455 | 4.044 | 9,53 | 21,25 | 411.062.500 |
-| Gira Urbana Medellín | 2026-07-20 | 40.069 | 3.992 | 9,96 | 21,81 | 425.890.900 |
-| Final del Fútbol Colombiano | 2026-08-31 | 42.667 | 4.296 | 10,07 | 22,58 | 463.376.500 |
+| Concierto Noche Latina | 2026-02-23 | 39.434 | 4.484 | 11,37 | 24,46 | 417.488.000 |
+| Clásico Paisa Nacional vs Medellín | 2026-05-25 | 43.838 | 5.227 | 11,92 | 25,82 | 491.537.500 |
+| Festival Sonidos del Valle | 2026-06-15 | 41.575 | 4.637 | 11,15 | 24,43 | 445.993.000 |
+| Gira Urbana Medellín | 2026-07-20 | 39.551 | 4.505 | 11,39 | 24,85 | 450.512.500 |
+| Final del Fútbol Colombiano | 2026-08-31 | 41.927 | 4.998 | 11,92 | 25,98 | 493.055.700 |
 
 ## 9. Ingreso potencial perdido por abandono, por zona
 
@@ -134,7 +134,7 @@ Generado por `scripts/analyze.py` (2026-10-20 11:08) sobre el esquema en estrell
 
 | nombre_zona | intentos | abandonos | abandono_pct | ingreso_potencial_perdido |
 |---|---|---|---|---|
-| Occidental | 69.816 | 9.406 | 13,47 | 1.494.180.000 |
-| Norte | 80.596 | 11.048 | 13,71 | 994.320.000 |
-| General | 92.557 | 12.617 | 13,63 | 757.020.000 |
-| VIP | 17.325 | 2.329 | 13,44 | 622.660.000 |
+| Occidental | 70.907 | 10.955 | 15,45 | 1.741.395.000 |
+| VIP | 18.704 | 3.473 | 18,57 | 931.250.000 |
+| Norte | 79.460 | 9.882 | 12,44 | 889.380.000 |
+| General | 88.835 | 10.765 | 12,12 | 645.900.000 |
