@@ -1,0 +1,677 @@
+---
+title: "Segmentación de clientes y riesgo de abandono en TuBoleta: análisis de componentes principales, clúster y regresión logística sobre el lakehouse"
+author: "Juan Pablo Salazar"
+date: "`r paste(format(Sys.Date(), '%d'), 'de', c('enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre')[as.integer(format(Sys.Date(), '%m'))], 'de', format(Sys.Date(), '%Y'))`"
+output:
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center", fig.width = 8, fig.height = 5,
+                      out.width = "90%")
+
+library(tidyverse)
+library(arrow)
+library(knitr)
+library(FactoMineR)
+library(factoextra)
+library(psych)
+library(cluster)
+library(corrplot)
+library(car)
+library(pROC)
+library(mclust)
+library(splines)
+
+set.seed(123)
+theme_set(theme_minimal(base_size = 12))
+
+# Formateadores para el texto dinámico (inline): todo número de la prosa sale de los datos
+f2  <- function(x, d = 2) formatC(x, format = "f", digits = d)
+fm  <- function(x, d = 0) formatC(x, format = "f", digits = d, big.mark = " ")
+fpc <- function(x, d = 1) paste0(formatC(100 * x, format = "f", digits = d), " %")
+fp  <- function(p) ifelse(p < 0.001, "< 0.001", paste0("= ", formatC(p, format = "f", digits = 3)))
+fuente <- "Fuente: lakehouse TuBoleta (capa Gold, datos sintéticos), cálculos propios"
+```
+
+```{r carga}
+gold <- file.path("lakehouse", "gold")  # relativo a la raíz del repo (ver analysis/render.R)
+leer <- function(tabla) read_parquet(file.path(gold, paste0(tabla, ".parquet")))
+
+ventas   <- leer("fact_ventas_boletas")
+intentos <- leer("fact_intentos_compra")
+tiempo   <- leer("dim_tiempo") |> select(tiempo_sk, fecha, hora, franja_horaria, es_fin_semana) |>
+  mutate(fecha = as.Date(fecha))
+evento   <- leer("dim_evento") |> select(evento_sk, nombre_evento, tipo_evento, fecha_evento, inicio_ventas) |>
+  mutate(across(c(fecha_evento, inicio_ventas), as.Date))
+canal    <- leer("dim_canal") |> select(canal_sk, canal = nombre, digital_flag)
+usuario  <- leer("dim_usuario") |> select(usuario_sk, usuario_id, segmento)
+
+# Verdad de terreno del generador: solo se usa al final de la sección 2 para validar el clúster
+ruta_verdad <- file.path("lakehouse", "validacion", "perfil_latente.parquet")
+if (!file.exists(ruta_verdad)) stop("Falta ", ruta_verdad, ": ejecute `python main.py` antes de renderizar.")
+verdad <- read_parquet(ruta_verdad)
+```
+
+# Introducción
+
+## Pregunta y enfoque
+
+El lakehouse de TuBoleta (Taller 3) deja en la capa Gold un modelo en estrella con `r fm(nrow(ventas))` boletas vendidas y `r fm(nrow(intentos))` intentos de compra para `r nrow(evento)` eventos del Estadio Atanasio Girardot. Las consultas SQL del taller describen el negocio variable por variable (ingresos por zona, embudo por canal, horarios). Este informe da el siguiente paso y estudia **varias variables a la vez** con dos familias de modelos multivariados:
+
+1. **Interdependencia: análisis de componentes principales (ACP) y clúster.** Ninguna variable es "respuesta"; se busca la estructura de correlación entre los hábitos de compra de cada cliente y, sobre ella, grupos de clientes parecidos. Pregunta: **¿qué tipos de cliente hay en TuBoleta?**
+2. **Dependencia: regresión logística.** Una variable respuesta binaria (el intento de compra terminó en abandono o en compra) explicada por varias predictoras. Pregunta: **¿qué condiciones de un intento aumentan el riesgo de que el cliente deje vencer el bloqueo de la silla?**
+
+Las dos partes se conectan: el segmento que sale del clúster entra como predictor en la regresión logística (sección 3.5).
+
+## Sobre los datos: por qué se enriqueció el generador
+
+Los datos son **sintéticos**. En la versión del Taller 3 cada variable se sorteaba de forma casi independiente: los abandonos copiaban la zona y el canal de una venta al azar, y el comprador de cada silla se elegía uniformemente. Sobre esos datos un modelo multivariado no tiene nada que encontrar (medido antes de este informe: AUC de la regresión logística de abandono = 0.508, el azar; correlaciones entre hábitos de cliente cercanas a cero salvo canal digital–horario nocturno).
+
+Para que el ejercicio tenga sentido, el generador (`scripts/generate_synthetic.py`) ahora asigna a cada usuario un **perfil latente** oculto que decide a la vez su segmento comercial, su canal, la zona a la que suele ir, cuántas veces compra, cuánta antelación toma, a qué hora compra y qué tan rápido paga; y la probabilidad de abandono depende del precio, el canal, la hora, el día de apertura, la espera en fila y el perfil. **El perfil nunca llega a Bronze**: se guarda aparte (`lakehouse/validacion/`) como verdad de terreno. Esto permite algo que con datos reales es imposible: comprobar si los modelos recuperan la estructura que de verdad existe.
+
+# Modelo de interdependencia: ACP y clúster de clientes
+
+## Perfil de compra por cliente
+
+```{r perfil}
+ventas_d <- ventas |>
+  left_join(tiempo, by = "tiempo_sk") |>
+  left_join(evento, by = "evento_sk") |>
+  left_join(canal, by = "canal_sk") |>
+  mutate(precio_lista = precio_pagado + descuento_aplicado,
+         pct_desc     = descuento_aplicado / precio_lista,
+         digital      = if_else(canal == "DESCONOCIDO", NA, digital_flag),
+         noche        = hora >= 18 | hora < 6,
+         antelacion   = as.numeric(fecha_evento - fecha))
+
+abandono_u <- intentos |>
+  filter(es_rechazo_unique == 0) |>
+  group_by(usuario_sk) |>
+  summarise(tasa_abandono = mean(es_abandono), .groups = "drop")
+
+perfil_todos <- ventas_d |>
+  group_by(usuario_sk) |>
+  summarise(n_compras    = n(),
+            precio_lista = mean(precio_lista),
+            pct_desc     = mean(pct_desc),
+            pct_digital  = mean(digital, na.rm = TRUE),
+            pct_noche    = mean(noche),
+            antelacion   = mean(antelacion),
+            pago_seg     = mean(tiempo_hasta_pago_seg),
+            .groups = "drop") |>
+  inner_join(abandono_u, by = "usuario_sk") |>
+  left_join(usuario, by = "usuario_sk")
+
+perfil <- perfil_todos |> filter(n_compras >= 2, !is.na(pct_digital))
+
+vars <- c("n_compras", "precio_lista", "pct_desc", "pct_digital", "pct_noche",
+          "antelacion", "pago_seg", "tasa_abandono")
+et_vars <- c(n_compras = "Compras (log)", precio_lista = "Precio de lista medio (log)",
+             pct_desc = "Descuento medio (%)", pct_digital = "Compras digitales (%)",
+             pct_noche = "Compras nocturnas (%)", antelacion = "Antelación (días)",
+             pago_seg = "Tiempo hasta pago (s)", tasa_abandono = "Tasa de abandono")
+
+X <- perfil |>
+  select(all_of(vars)) |>
+  mutate(n_compras = log(n_compras), precio_lista = log(precio_lista)) |>
+  as.data.frame()
+```
+
+La unidad de análisis es el **cliente**. Para cada uno se resumen sus compras en `r length(vars)` hábitos, todos calculados desde la capa Gold:
+
+| Variable | Definición | Qué captura |
+|---|---|---|
+| Compras (log) | log del número de boletas compradas | frecuencia / fidelidad |
+| Precio de lista medio (log) | log del precio base medio de sus boletas | zona a la que va (VIP ... General) |
+| Descuento medio | descuento / precio de lista, promedio | sensibilidad al precio |
+| Compras digitales | % de compras por app o web (excluye canal desconocido) | canal |
+| Compras nocturnas | % de compras entre 18:00 y 05:59 | horario |
+| Antelación | días promedio entre la compra y el evento | planeación vs. última hora |
+| Tiempo hasta pago | segundos promedio entre el bloqueo y el pago | decisión / fricción en el pago |
+| Tasa de abandono | abandonos / (abandonos + compras) de sus intentos | riesgo |
+
+Se usan los **`r fm(nrow(perfil))` clientes con al menos dos compras** (de `r fm(nrow(perfil_todos))` con alguna compra): con una sola compra los porcentajes valen 0 o 1 y no describen un hábito. El número de compras y el precio entran en logaritmo por su asimetría. Todas las variables se estandarizan antes del ACP (las escalas van de proporciones a cientos de miles de pesos).
+
+```{r tabla-descriptiva}
+perfil |>
+  select(all_of(vars)) |>
+  pivot_longer(everything(), names_to = "variable") |>
+  group_by(variable) |>
+  summarise(media = mean(value), de = sd(value), p25 = quantile(value, .25),
+            mediana = median(value), p75 = quantile(value, .75), .groups = "drop") |>
+  mutate(variable = factor(variable, levels = vars, labels = str_remove(et_vars[vars], " \\(log\\)"))) |>
+  arrange(variable) |>
+  kable(digits = 3, format.args = list(big.mark = " ", scientific = FALSE),
+        caption = "Hábitos de compra por cliente (escala original, antes del logaritmo)")
+```
+
+## ¿Es factorizable la matriz? Correlaciones, KMO y Bartlett
+
+```{r adecuacion}
+R_cor <- cor(X)
+kmo <- KMO(R_cor)
+bart <- cortest.bartlett(R_cor, n = nrow(X))
+cor_max <- max(abs(R_cor[upper.tri(R_cor)]))
+# Escala de Kaiser (1974) para el KMO
+escala_kmo <- as.character(cut(kmo$MSA, c(0, .5, .6, .7, .8, .9, 1), right = FALSE,
+                               labels = c("inaceptable", "miserable", "mediocre", "regular", "meritoria", "maravillosa")))
+```
+
+```{r corrplot, fig.height=6}
+dimnames(R_cor) <- list(et_vars[vars], et_vars[vars])
+corrplot(R_cor, method = "color", type = "upper", addCoef.col = "black", number.cex = .7,
+         tl.col = "black", tl.cex = .8, col = COL2("RdBu"), diag = FALSE,
+         title = "Correlaciones entre hábitos de compra", mar = c(0, 0, 2, 0))
+```
+
+Las correlaciones son **moderadas** (la mayor en valor absoluto es `r f2(cor_max)`), lo esperable en hábitos de consumo: ningún par es redundante y tampoco son independientes. Las dos pruebas previas al ACP:
+
+- **Esfericidad de Bartlett:** $\chi^2$ = `r fm(bart$chisq)` con `r bart$df` g.l., p `r fp(bart$p.value)`. Se rechaza que la matriz de correlaciones sea la identidad: hay estructura común que resumir. Con `r fm(nrow(X))` observaciones esta prueba rechaza casi siempre, así que solo descarta el caso trivial.
+- **Kaiser-Meyer-Olkin (KMO):** `r f2(kmo$MSA)` global, "`r escala_kmo`" en la escala de Kaiser (0.5 es el mínimo aceptable y 0.8 se considera meritorio). Las correlaciones parciales no son mucho más pequeñas que las simples: cada hábito aporta bastante información propia y los componentes no van a concentrar la varianza en uno o dos ejes. El ACP es adecuado, pero su papel aquí es sobre todo **ordenar y decorrelacionar** las variables antes del clúster, más que reducirlas a uno o dos índices.
+
+```{r kmo-tabla}
+tibble(variable = et_vars[vars], MSA = kmo$MSAi[vars]) |>
+  kable(digits = 2, caption = "Adecuación muestral (MSA) por variable")
+```
+
+## Componentes principales
+
+```{r acp}
+acp <- PCA(X, scale.unit = TRUE, ncp = length(vars), graph = FALSE)
+eig <- as.data.frame(acp$eig) |> rownames_to_column("componente") |>
+  setNames(c("componente", "autovalor", "pct_var", "pct_acum"))
+n_kaiser <- sum(eig$autovalor > 1)
+n_80 <- which(eig$pct_acum >= 80)[1]
+cargas <- acp$var$coord
+```
+
+```{r scree, fig.height=4}
+fviz_eig(acp, addlabels = TRUE, choice = "eigenvalue", geom = "line", ncp = length(vars)) +
+  geom_hline(yintercept = 1, linetype = 2, colour = "grey40") +
+  labs(title = "Autovalores de los componentes", subtitle = "Línea punteada: criterio de Kaiser (autovalor > 1)",
+       x = "Componente", y = "Autovalor", caption = fuente)
+```
+
+`r n_kaiser` componentes tienen autovalor mayor que 1 (criterio de Kaiser) y explican juntos el `r f2(eig$pct_acum[n_kaiser], 1)` % de la varianza; el primero solo explica el `r f2(eig$pct_var[1], 1)` %. La varianza está repartida, coherente con el KMO: no hay un "factor dominante" de comportamiento.
+
+```{r cargas}
+as.data.frame(cargas[, 1:n_kaiser]) |>
+  rownames_to_column("variable") |>
+  mutate(variable = et_vars[variable]) |>
+  setNames(c("Variable", paste0("CP", 1:n_kaiser))) |>
+  kable(digits = 2, caption = "Cargas (correlación variable-componente) de los componentes retenidos por Kaiser")
+```
+
+```{r circulo, fig.height=6, fig.width=7}
+fviz_pca_var(acp, axes = c(1, 2), col.var = "contrib", repel = TRUE,
+             gradient.cols = c("#9ecae1", "#3182bd", "#08306b")) +
+  labs(title = "Círculo de correlaciones (CP1 y CP2)", caption = fuente)
+```
+
+```{r interpretacion, include=FALSE}
+# Variables que más cargan (|carga| >= 0.4) en cada componente, para el texto
+top_cargas <- function(k) {
+  v <- cargas[, k]
+  v <- v[abs(v) >= 0.4]
+  v <- v[order(-abs(v))]
+  paste0(et_vars[names(v)], " (", f2(v), ")", collapse = ", ")
+}
+```
+
+Lectura de los componentes (variables con carga de 0.4 o más en valor absoluto):
+
+`r paste0("- **CP", 1:n_kaiser, "** (", f2(eig$pct_var[1:n_kaiser], 1), " %): ", sapply(1:n_kaiser, top_cargas), collapse = "\n")`
+
+- **CP1, fidelidad digital:** junta al cliente frecuente, digital y nocturno, que compra con antelación y en zonas baratas (con algo de descuento), y lo opone al que compra poco, en taquilla o de día, a última hora y en zonas caras.
+- **CP2, fricción y riesgo:** junta la tasa de abandono y el tiempo hasta el pago (clientes que dudan), sobre todo en canales digitales y entre quienes compran poco. El precio casi no carga aquí: dudar no es cosa solo de las zonas caras.
+- **CP3, sensibilidad al precio:** lo domina el descuento, acompañado de pago lento y algo de antelación (preventa).
+
+Los signos de un componente son arbitrarios: lo que importa es qué variables van juntas y cuáles se oponen.
+
+## Clúster de clientes sobre los componentes
+
+El clúster se hace sobre las **puntuaciones de los `r n_80` primeros componentes** (`r f2(eig$pct_acum[n_80], 1)` % de la varianza). Usar solo los `r n_kaiser` de Kaiser descartaría casi la mitad de la información, porque aquí la varianza está repartida; quedarse con el 80 % elimina el ruido de los últimos ejes y deja variables no correlacionadas y en la misma escala, que es lo que supone k-medias.
+
+```{r k-eleccion}
+puntos <- acp$ind$coord[, 1:n_80]
+idx_sil <- sample(nrow(puntos), 5000)
+d_sil <- dist(puntos[idx_sil, ])
+
+ajustes_k <- purrr::map(2:8,~ kmeans(puntos, centers = .x, nstart = 20, iter.max = 100))
+eleccion_k <- map2_dfr(2:8, ajustes_k, function(k, km) {
+  n <- nrow(puntos)
+  tibble(k = k,
+         wss = km$tot.withinss,
+         calinski = (km$betweenss / (k - 1)) / (km$tot.withinss / (n - k)),
+         silueta = mean(silhouette(km$cluster[idx_sil], d_sil)[, "sil_width"]))
+})
+k_elegido <- 5
+sil <- setNames(eleccion_k$silueta, eleccion_k$k)
+k_sil_max <- eleccion_k$k[which.max(eleccion_k$silueta)]
+```
+
+```{r k-graficos, fig.height=3.6}
+eleccion_k |>
+  pivot_longer(-k, names_to = "criterio") |>
+  mutate(criterio = dplyr::recode(criterio, wss = "Suma de cuadrados intra (codo)",
+                           calinski = "Calinski-Harabasz (más alto, mejor)",
+                           silueta = "Silueta media (más alto, mejor)")) |>
+  ggplot(aes(k, value)) +
+  geom_line(colour = "#3182bd") + geom_point(colour = "#3182bd") +
+  geom_vline(xintercept = k_elegido, linetype = 2, colour = "grey40") +
+  facet_wrap(~criterio, scales = "free_y") +
+  scale_x_continuous(breaks = 2:8) +
+  labs(x = "Número de grupos (k)", y = NULL, title = "Elección del número de grupos", caption = fuente)
+```
+
+```{r k-tabla}
+kable(eleccion_k, digits = 3, col.names = c("k", "Suma de cuadrados intra", "Calinski-Harabasz", "Silueta media"),
+      format.args = list(big.mark = " "))
+```
+
+Se eligen **k = `r k_elegido`** grupos. La silueta media es baja para todo k (entre `r f2(min(eleccion_k$silueta))` y `r f2(max(eleccion_k$silueta))`): los clientes no forman nubes separadas sino un continuo con zonas más densas, lo normal en comportamiento de consumo. **Las métricas no deciden por sí solas:** el codo de la suma de cuadrados es suave, Calinski-Harabasz baja a medida que crece k (favorece pocos grupos) y la silueta sube muy despacio hasta k = `r k_sil_max` (`r f2(sil[as.character(k_sil_max)], 3)`, frente a `r f2(sil[as.character(k_elegido)], 3)` con k = `r k_elegido`). Se elige k = `r k_elegido` porque pasar de `r k_elegido` a `r k_elegido + 1` grupos solo mejora la silueta en `r f2(sil[as.character(k_elegido + 1)] - sil[as.character(k_elegido)], 3)` y porque con `r k_elegido` grupos cada uno tiene un rasgo dominante distinto que se puede nombrar y usar (tabla siguiente). Combinar las métricas con la interpretabilidad es la práctica habitual en segmentación; la sección 2.5 revisa a posteriori esta elección.
+
+```{r kmeans-final}
+km <- kmeans(puntos, centers = k_elegido, nstart = 50, iter.max = 100)
+perfil$cluster <- km$cluster
+
+medias <- perfil |>
+  group_by(cluster) |>
+  summarise(clientes = n(), across(all_of(vars), mean), .groups = "drop")
+
+# Nombre de cada grupo por su rasgo dominante; cada regla elige entre los grupos aún sin nombre
+nombrar <- function(m) {
+  nombres <- rep(NA_character_, nrow(m))
+  reglas <- list(
+    "Taquilla tradicional" = function(d) which.min(d$pct_digital),
+    "Premium"              = function(d) which.max(d$precio_lista),
+    "Fieles nocturnos"     = function(d) which.max(d$n_compras),
+    "Cazadores de ofertas" = function(d) which.max(d$pct_desc)
+  )
+  for (nombre in names(reglas)) {
+    libres <- which(is.na(nombres))
+    nombres[libres[reglas[[nombre]](m[libres, ])]] <- nombre
+  }
+  nombres[is.na(nombres)] <- "Ocasionales de última hora"
+  nombres
+}
+stopifnot(k_elegido == 5)
+medias$segmento_modelo <- nombrar(medias)
+perfil <- perfil |> left_join(select(medias, cluster, segmento_modelo), by = "cluster")
+orden_seg <- c("Fieles nocturnos", "Cazadores de ofertas", "Premium", "Taquilla tradicional", "Ocasionales de última hora")
+paleta_seg <- setNames(c("#1B9E77", "#D95F02", "#7570B3", "#E7298A", "#66A61E"), orden_seg)
+```
+
+```{r perfiles-tabla}
+medias |>
+  mutate(segmento_modelo = factor(segmento_modelo, levels = orden_seg),
+         pct = clientes / sum(clientes),
+         across(c(pct_desc, pct_digital, pct_noche, tasa_abandono, pct), ~ 100 * .x)) |>
+  arrange(segmento_modelo) |>
+  select(segmento_modelo, clientes, pct, all_of(vars)) |>
+  kable(digits = c(0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1),
+        col.names = c("Segmento", "Clientes", "% clientes", "Compras", "Precio lista", "Descuento %", "Digital %",
+                      "Nocturno %", "Antelación (d)", "Pago (s)", "Abandono %"),
+        format.args = list(big.mark = " "),
+        caption = "Perfil medio de cada segmento (escala original)")
+```
+
+```{r perfiles-heatmap, fig.height=4.2}
+perfil |>
+  select(segmento_modelo, all_of(vars)) |>
+  mutate(n_compras = log(n_compras), precio_lista = log(precio_lista)) |>
+  mutate(across(all_of(vars), ~ (.x - mean(.x)) / sd(.x))) |>
+  group_by(segmento_modelo) |>
+  summarise(across(all_of(vars), mean), .groups = "drop") |>
+  pivot_longer(-segmento_modelo, names_to = "variable", values_to = "z") |>
+  mutate(variable = factor(et_vars[variable], levels = et_vars[vars]),
+         segmento_modelo = factor(segmento_modelo, levels = rev(orden_seg))) |>
+  ggplot(aes(variable, segmento_modelo, fill = z)) +
+  geom_tile(colour = "white") +
+  geom_text(aes(label = f2(z, 1)), size = 3.2) +
+  scale_fill_gradient2(low = "#2166ac", mid = "white", high = "#b2182b", limits = c(-2, 2), oob = scales::squish) +
+  labs(x = NULL, y = NULL, fill = "z", title = "Cuánto se aleja cada segmento de la media",
+       subtitle = "Media del segmento en desviaciones estándar (0 = cliente promedio)", caption = fuente) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+```
+
+```{r plano-clientes, fig.height=5.5}
+muestra <- sample(nrow(perfil), 6000)
+as_tibble(acp$ind$coord[muestra, 1:2]) |>
+  mutate(segmento = factor(perfil$segmento_modelo[muestra], levels = orden_seg)) |>
+  ggplot(aes(Dim.1, Dim.2, colour = segmento)) +
+  geom_point(alpha = .35, size = .8) +
+  stat_ellipse(linewidth = .8) +
+  scale_colour_manual(values = paleta_seg) +
+  labs(x = paste0("CP1 (", f2(eig$pct_var[1], 1), " %)"), y = paste0("CP2 (", f2(eig$pct_var[2], 1), " %)"),
+       colour = NULL, title = "Clientes en el plano de los dos primeros componentes",
+       subtitle = "Muestra aleatoria de 6 000 clientes; elipses al 95 %", caption = fuente) +
+  guides(colour = guide_legend(override.aes = list(alpha = 1, size = 2)))
+```
+
+```{r textos-seg, include=FALSE}
+m <- medias |> mutate(across(c(pct_desc, pct_digital, pct_noche, tasa_abandono), ~ 100 * .x))
+s <- function(seg, var, d = 1) f2(m[[var]][m$segmento_modelo == seg], d)
+pct_seg <- function(seg) fpc(m$clientes[m$segmento_modelo == seg] / sum(m$clientes))
+media_gral <- perfil |> summarise(across(all_of(vars), mean)) |>
+  mutate(across(c(pct_desc, pct_digital, pct_noche, tasa_abandono), ~ 100 * .x))
+g <- function(var, d = 1) f2(media_gral[[var]], d)
+```
+
+Los cinco segmentos, nombrados por su rasgo dominante (entre paréntesis, la media de todos los clientes):
+
+- **Fieles nocturnos** (`r pct_seg("Fieles nocturnos")` de los clientes): los que más compran (`r s("Fieles nocturnos", "n_compras")` boletas; media `r g("n_compras")`), casi todo digital (`r s("Fieles nocturnos", "pct_digital")` %) y de noche (`r s("Fieles nocturnos", "pct_noche")` %), los que más antelación toman (`r s("Fieles nocturnos", "antelacion")` días), los que pagan más rápido (`r s("Fieles nocturnos", "pago_seg", 0)` s; media `r g("pago_seg", 0)`) y con poco abandono (`r s("Fieles nocturnos", "tasa_abandono")` %; media `r g("tasa_abandono")` %).
+- **Cazadores de ofertas** (`r pct_seg("Cazadores de ofertas")`): el mayor descuento medio (`r s("Cazadores de ofertas", "pct_desc")` %; media `r g("pct_desc")` %), las zonas más baratas (`r fm(m$precio_lista[m$segmento_modelo == "Cazadores de ofertas"])` COP de precio de lista medio), compran con antelación (preventa) y tienen el abandono más alto (`r s("Cazadores de ofertas", "tasa_abandono")` %).
+- **Premium** (`r pct_seg("Premium")`): precio de lista medio de `r fm(m$precio_lista[m$segmento_modelo == "Premium"])` COP (VIP y Occidental), compran menos de noche (`r s("Premium", "pct_noche")` %) y son los que más tardan en pagar (`r s("Premium", "pago_seg", 0)` s).
+- **Taquilla tradicional** (`r pct_seg("Taquilla tradicional")`): solo el `r s("Taquilla tradicional", "pct_digital")` % de sus compras es digital, casi nunca de noche (`r s("Taquilla tradicional", "pct_noche")` %), y es el segmento que menos abandona (`r s("Taquilla tradicional", "tasa_abandono")` %).
+- **Ocasionales de última hora** (`r pct_seg("Ocasionales de última hora")`): pocas compras (`r s("Ocasionales de última hora", "n_compras")`), la menor antelación (`r s("Ocasionales de última hora", "antelacion")` días), casi sin descuento (`r s("Ocasionales de última hora", "pct_desc")` %) y abandono por encima de la media (`r s("Ocasionales de última hora", "tasa_abandono")` %).
+
+## Validación: ¿recupera el clúster los perfiles simulados?
+
+```{r validacion}
+perfil <- perfil |> left_join(verdad, by = "usuario_id")
+ari <- adjustedRandIndex(perfil$segmento_modelo, perfil$perfil_latente)
+tabla_val <- table(Segmento = factor(perfil$segmento_modelo, levels = orden_seg),
+                   `Perfil latente` = perfil$perfil_latente)
+acierto <- sum(apply(tabla_val, 1, max)) / sum(tabla_val)
+ari_segmento <- adjustedRandIndex(perfil$segmento, perfil$perfil_latente)
+# A posteriori (no se usó para elegir k): acuerdo con la verdad para cada k probado
+ari_k <- map_dbl(ajustes_k, ~ adjustedRandIndex(.x$cluster, perfil$perfil_latente))
+k_ari_max <- (2:8)[which.max(ari_k)]
+```
+
+```{r validacion-tabla}
+round(100 * prop.table(tabla_val, 1), 1) |>
+  as.data.frame.matrix() |>
+  rownames_to_column("Segmento del modelo") |>
+  kable(caption = "Composición de cada segmento según el perfil latente (% de la fila)")
+```
+
+Como los datos son simulados, se puede comparar el segmento asignado con el perfil latente que usó el generador (nunca visto por el modelo). El **índice de Rand ajustado** es `r f2(ari)` (0 = acuerdo al azar, 1 = recuperación perfecta) y el `r fpc(acierto)` de los clientes cae en el segmento cuyo perfil latente es mayoritario. La recuperación es buena pero imperfecta, y por una razón realista: con `r f2(median(perfil$n_compras), 0)` compras medianas por cliente los porcentajes son ruidosos, y los perfiles se solapan (un ocasional que compró en preventa con descuento se parece a un cazador de ofertas). Como referencia, el segmento comercial que ya existe en `dim_usuario` (general, estudiante, corporativo...) solo alcanza un índice de `r f2(ari_segmento)`: **la segmentación por comportamiento describe a los clientes mucho mejor que la etiqueta comercial**.
+
+Revisión a posteriori del número de grupos (con datos reales no se podría hacer, y por eso no se usó para elegir): el índice de Rand ajustado para k = 2 ... 8 es `r paste0(f2(ari_k), collapse = ", ")`. El máximo está en k = `r k_ari_max``r if (k_ari_max == k_elegido) ", la misma elección que se hizo con métricas e interpretabilidad" else paste0(", no en el k elegido (", k_elegido, ")")`. Si se hubiera seguido solo la silueta (k = `r k_sil_max`) el acuerdo sería `r f2(ari_k[k_sil_max - 1])`.
+
+## Resultado al lakehouse
+
+El segmento de cada cliente se escribe en la capa Gold como `usuario_segmento_modelo.parquet` (`usuario_sk`, `usuario_id`, `segmento_modelo`), para que las consultas SQL puedan cruzar ventas o embudo por segmento con un `JOIN`. Es una tabla derivada de un modelo, no del sistema operacional: se regenera al volver a renderizar este informe.
+
+```{r escribir-gold}
+perfil |>
+  select(usuario_sk, usuario_id, segmento_modelo) |>
+  write_parquet(file.path(gold, "usuario_segmento_modelo.parquet"))
+```
+
+# Modelo de dependencia: regresión logística del abandono
+
+## Planteamiento
+
+```{r datos-logit}
+logit_d <- intentos |>
+  filter(es_rechazo_unique == 0) |>
+  left_join(tiempo, by = "tiempo_sk") |>
+  left_join(evento, by = "evento_sk") |>
+  left_join(canal, by = "canal_sk") |>
+  left_join(usuario, by = "usuario_sk") |>
+  transmute(usuario_sk, es_abandono,
+            log_precio = log(precio_lista / 90000),
+            canal      = relevel(factor(canal), "app"),
+            franja     = factor(franja_horaria, levels = c("mañana", "madrugada", "tarde", "noche")),
+            dias       = as.numeric(fecha - inicio_ventas),
+            primer_dia = dias == 0,
+            log_fila   = log(pmax(tiempo_en_fila_seg, 1)),
+            fin_semana = es_fin_semana,
+            tipo_evento = relevel(factor(tipo_evento), "concierto"),
+            segmento   = relevel(factor(segmento), "general"))
+
+n_rechazo <- sum(intentos$es_rechazo_unique)
+tasa_ab <- mean(logit_d$es_abandono)
+en_train <- runif(nrow(logit_d)) < 0.7
+train <- logit_d[en_train, ]
+test  <- logit_d[!en_train, ]
+```
+
+**Respuesta:** `es_abandono` = 1 si el bloqueo de la silla venció sin pago y 0 si terminó en compra. Se excluyen los `r fm(n_rechazo)` rechazos por `UNIQUE`: no son una decisión del cliente sino un choque de concurrencia (la silla ya estaba vendida) y mezclarlos confundiría dos mecanismos. Quedan `r fm(nrow(logit_d))` intentos, con una tasa de abandono del `r fpc(tasa_ab)`.
+
+**Predictoras** (todas disponibles en Gold al momento del intento):
+
+| Predictora | Tipo | Referencia | Hipótesis |
+|---|---|---|---|
+| log(precio de lista / 90 000) | continua | 0 = zona Norte | a mayor precio, más duda en pagar |
+| Canal | categórica | app | la taquilla (presencial) abandona menos |
+| Franja horaria | categórica | mañana | de madrugada se abandona más |
+| Primer día de ventas | binaria | no | la saturación de la apertura aumenta el abandono |
+| Días desde la apertura | spline natural (4 g.l.) | — | control: la espera en fila y la mezcla de clientes cambian a lo largo de la ventana de venta |
+| log(tiempo en fila) | continua | — | más espera, más abandono |
+| Fin de semana | binaria | no | sin efecto esperado (control) |
+| Tipo de evento | categórica | concierto | sin efecto esperado (control) |
+| Segmento comercial | categórica | general | estudiantes más sensibles al precio |
+
+El modelo es
+
+$$
+\log \frac{P(\text{abandono})}{1 - P(\text{abandono})} = \beta_0 + \beta_1 \log\frac{\text{precio}}{90\,000} + \sum_j \beta_j x_j ,
+$$
+
+y cada $e^{\beta}$ es una **razón de odds** (odds ratio, OR): cuánto se multiplican las odds de abandonar al cambiar la predictora, con lo demás constante. Se estima con el `r fpc(mean(en_train), 0)` de los intentos (`r fm(nrow(train))`) y se evalúa con el resto (`r fm(nrow(test))`), que el modelo no ve.
+
+## Estimación
+
+```{r logit-ajuste}
+formula_base <- es_abandono ~ log_precio + canal + franja + primer_dia + ns(dias, 4) + log_fila + fin_semana + tipo_evento + segmento
+m1 <- glm(formula_base, data = train, family = binomial)
+# Especificación ingenua, sin la curva de días: solo para mostrar el problema (sección 3.2)
+m0 <- update(m1, . ~ . - ns(dias, 4))
+b0 <- coef(m0)
+
+et_coef <- c(log_precio = "log(precio / 90 000)", canalweb = "Canal: web", canaltaquilla = "Canal: taquilla",
+             canalDESCONOCIDO = "Canal: desconocido", franjamadrugada = "Franja: madrugada",
+             franjatarde = "Franja: tarde", franjanoche = "Franja: noche", primer_diaTRUE = "Primer día de ventas",
+             log_fila = "log(tiempo en fila)", fin_semanaTRUE = "Fin de semana",
+             tipo_eventopartido = "Evento: partido", segmentocorporativo = "Segmento: corporativo",
+             segmentoestudiante = "Segmento: estudiante", segmentofan_club = "Segmento: fan club",
+             segmentofrecuente = "Segmento: frecuente")
+
+coefs <- broom::tidy(m1) |>
+  filter(term != "(Intercept)", !str_starts(term, "ns\\(")) |>
+  mutate(OR = exp(estimate),
+         IC_inf = exp(estimate - 1.96 * std.error),
+         IC_sup = exp(estimate + 1.96 * std.error),
+         termino = et_coef[term])
+```
+
+```{r logit-tabla}
+coefs |>
+  transmute(Predictora = termino, `β` = estimate, `Error est.` = std.error, OR, `IC 95 % inf.` = IC_inf,
+            `IC 95 % sup.` = IC_sup, `p` = ifelse(p.value < 0.001, "< 0.001", f2(p.value, 3))) |>
+  kable(digits = 3, caption = "Regresión logística del abandono (conjunto de entrenamiento; se omiten los 4 coeficientes del spline de días)")
+```
+
+```{r forest, fig.height=5.5}
+coefs |>
+  mutate(termino = fct_reorder(termino, OR)) |>
+  ggplot(aes(OR, termino)) +
+  geom_vline(xintercept = 1, linetype = 2, colour = "grey50") +
+  geom_errorbarh(aes(xmin = IC_inf, xmax = IC_sup), height = .2, colour = "#3182bd") +
+  geom_point(colour = "#08306b", size = 2) +
+  scale_x_log10() +
+  labs(x = "Razón de odds de abandono (escala log, IC 95 %)", y = NULL,
+       title = "¿Qué aumenta el riesgo de abandono?", subtitle = "OR > 1: más abandono; OR < 1: menos",
+       caption = fuente)
+```
+
+```{r textos-logit, include=FALSE}
+or <- function(t) f2(coefs$OR[coefs$term == t])
+cambio <- function(t) fpc(abs(coefs$OR[coefs$term == t] - 1), 0)
+or_vip <- exp(coefs$estimate[coefs$term == "log_precio"] * log(280000 / 60000))
+```
+
+Lectura de las razones de odds (con lo demás constante):
+
+- **Precio.** Cada aumento de una unidad del log-precio multiplica las odds por `r or("log_precio")`; pasar de General (60 000) a VIP (280 000) las multiplica por `r f2(or_vip)`.
+- **Canal.** Frente a la app, la web tiene OR `r or("canalweb")` y la taquilla `r or("canaltaquilla")`: quien está en la fila física abandona `r cambio("canaltaquilla")` menos (en odds).
+- **Horario.** La madrugada (OR `r or("franjamadrugada")`) y la noche (OR `r or("franjanoche")`) elevan el riesgo frente a la mañana; la tarde (OR `r or("franjatarde")`) no se distingue de la mañana.
+- **Apertura y espera.** El primer día de ventas (OR `r or("primer_diaTRUE")`) y la espera en fila (OR `r or("log_fila")` cada vez que la espera se multiplica por *e* ≈ 2.7; duplicarla multiplica las odds por `r f2(2^coefs$estimate[coefs$term == "log_fila"])`) son los efectos operativos que TuBoleta sí controla.
+- **Controles.** Fin de semana (OR `r or("fin_semanaTRUE")`) y tipo de evento (OR `r or("tipo_eventopartido")`) quedan cerca de 1, como se esperaba. Con más de cien mil intentos hasta efectos minúsculos pueden salir "significativos", así que se lee la **magnitud** del OR y no solo el valor p.
+
+**La especificación importa.** Sin la curva de días desde la apertura, el modelo da para el primer día un coeficiente de `r f2(b0[["primer_diaTRUE"]], 3)` (OR `r f2(exp(b0[["primer_diaTRUE"]]))`): el signo se invierte y parece que la apertura *protege* del abandono. La razón es que en los primeros días todos esperan más en la fila, así que una espera larga es normal ese día y dice menos sobre el riesgo. Si el modelo no sabe en qué momento de la ventana de venta ocurre el intento, la variable del primer día termina corrigiendo ese efecto de la espera. Con la curva de días, cada predictora se compara con lo esperable en ese momento de la venta.
+- **Segmento comercial.** Estudiantes (OR `r or("segmentoestudiante")`) abandonan más que el público general, y fan club (OR `r or("segmentofan_club")`) y corporativos (OR `r or("segmentocorporativo")`) menos.
+
+## Supuestos y diagnóstico
+
+```{r vif}
+vif_m1 <- vif(m1)
+gvif_aj <- vif_m1[, "GVIF^(1/(2*Df))"]
+```
+
+- **Independencia de las observaciones.** Un mismo cliente aporta varios intentos, así que los errores estándar de la tabla son algo optimistas. Con este tamaño de muestra no cambia ninguna conclusión; con datos reales convendría usar errores agrupados por cliente o un modelo mixto.
+- **Multicolinealidad.** El GVIF ajustado ($GVIF^{1/(2gl)}$) máximo es `r f2(max(gvif_aj))` (en `r names(which.max(gvif_aj))`), muy por debajo del umbral habitual de $\sqrt{5} \approx 2.24$: las predictoras no son redundantes.
+- **Linealidad en el logit** de las continuas: precio y espera entran en logaritmo y los días desde la apertura con un spline, que no impone ninguna forma.
+- **Constante.** Los abandonos del generador salen de un muestreo con peso, así que el intercepto (la tasa base) no es interpretable; las razones de odds sí lo son, que es lo que se analiza.
+
+## Desempeño predictivo (conjunto de prueba)
+
+```{r desempeno}
+test$prob <- predict(m1, newdata = test, type = "response")
+roc_m1 <- roc(test$es_abandono, test$prob, quiet = TRUE)
+auc_ci <- ci.auc(roc_m1)
+mejor <- coords(roc_m1, "best", best.method = "youden", ret = c("threshold", "sensitivity", "specificity"))
+umbral <- mejor$threshold[1]
+pred_clase <- as.integer(test$prob >= umbral)
+matriz <- table(Predicho = factor(pred_clase, 0:1, c("Compra", "Abandono")),
+                Real = factor(test$es_abandono, 0:1, c("Compra", "Abandono")))
+lift_10 <- test |> mutate(decil = ntile(-prob, 10)) |> filter(decil == 1) |> pull(es_abandono) |> mean() / mean(test$es_abandono)
+```
+
+```{r roc, fig.height=4.5, fig.width=5.5, out.width="60%"}
+ggroc(roc_m1, colour = "#08306b") +
+  geom_abline(slope = 1, intercept = 1, linetype = 2, colour = "grey50") +
+  labs(title = "Curva ROC (conjunto de prueba)", subtitle = paste0("AUC = ", f2(auc_ci[2], 3)),
+       x = "Especificidad", y = "Sensibilidad", caption = fuente) +
+  coord_equal()
+```
+
+- **AUC = `r f2(auc_ci[2], 3)`** (IC 95 %: `r f2(auc_ci[1], 3)`–`r f2(auc_ci[3], 3)`): tomando al azar un intento que terminó en abandono y otro que terminó en compra, el modelo le asigna más riesgo al abandono el `r fpc(auc_ci[2], 0)` de las veces. Es una discriminación **aceptable** (0.7-0.8), no excelente: el abandono depende también de cosas que el lakehouse no registra (el saldo de la tarjeta, una llamada que interrumpe la compra).
+- Con el umbral de Youden (`r f2(umbral, 3)`), el modelo detecta el `r fpc(mejor$sensitivity[1])` de los abandonos (sensibilidad) y acierta el `r fpc(mejor$specificity[1])` de las compras (especificidad).
+- **Lift:** el 10 % de los intentos con más riesgo según el modelo tiene `r f2(lift_10)` veces la tasa de abandono media. Para una acción focalizada (recordatorio de pago, más tiempo de bloqueo) esto es más útil que la clasificación binaria.
+
+```{r matriz}
+kable(matriz, caption = paste0("Matriz de confusión con umbral ", f2(umbral, 3)), format.args = list(big.mark = " "))
+```
+
+```{r calibracion, fig.height=4.2, fig.width=5.5, out.width="60%"}
+calib <- test |>
+  mutate(decil = ntile(prob, 10)) |>
+  group_by(decil) |>
+  summarise(predicho = mean(prob), observado = mean(es_abandono), .groups = "drop")
+cal_dev <- max(abs(calib$predicho - calib$observado))
+calib |>
+  ggplot(aes(predicho, observado)) +
+  geom_abline(linetype = 2, colour = "grey50") +
+  geom_line(colour = "#3182bd") + geom_point(colour = "#08306b", size = 2) +
+  scale_x_continuous(labels = scales::percent) + scale_y_continuous(labels = scales::percent) +
+  labs(x = "Probabilidad predicha (media del decil)", y = "Tasa observada de abandono",
+       title = "Calibración por deciles de riesgo", caption = fuente) +
+  coord_equal()
+```
+
+En los diez deciles de riesgo (de `r fpc(min(calib$predicho))` a `r fpc(max(calib$predicho))` de probabilidad predicha), la tasa observada se aleja como máximo `r f2(100 * cal_dev, 1)` puntos porcentuales de la predicha: las probabilidades del modelo `r if (cal_dev < 0.02) "están bien calibradas y se pueden leer como riesgos" else "ordenan bien el riesgo, pero conviene recalibrarlas antes de leerlas como riesgos absolutos"`.
+
+## Validación contra el generador
+
+```{r verdad-coef}
+# Efectos que el generador usa en el log-odds del abandono (scripts/generate_synthetic.py).
+# El de la espera sale de comparar dos lognormales con sigma 0.8 desplazadas log(1.65) = 0.5: 0.5 / 0.8^2.
+verdad_coef <- tribble(
+  ~term,                ~simulado,
+  "log_precio",          0.60,
+  "canalweb",            0.35,
+  "canaltaquilla",      -0.80,
+  "franjamadrugada",     0.50,
+  "franjatarde",         0.00,
+  "franjanoche",         0.20,
+  "primer_diaTRUE",      0.40,
+  "log_fila",            0.50 / 0.8^2,
+  "fin_semanaTRUE",      0.00,
+  "tipo_eventopartido",  0.00
+)
+comparacion <- verdad_coef |>
+  left_join(select(coefs, term, estimate, std.error), by = "term") |>
+  mutate(Predictora = et_coef[term], dentro_ic = abs(estimate - simulado) <= 1.96 * std.error)
+est <- function(t) f2(comparacion$estimate[comparacion$term == t], 2)
+cerca <- abs(comparacion$estimate - comparacion$simulado) < 0.15
+```
+
+```{r verdad-tabla}
+comparacion |>
+  transmute(Predictora, `β simulado` = simulado, `β estimado` = estimate,
+            `Diferencia` = estimate - simulado, `¿Dentro del IC 95 %?` = if_else(dentro_ic, "sí", "no")) |>
+  kable(digits = 3, caption = "Efectos del generador frente a los estimados")
+```
+
+`r sum(cerca)` de los `r nrow(comparacion)` efectos estimados quedan a menos de 0.15 del valor simulado y todos tienen el signo correcto o son prácticamente nulos donde el efecto simulado es cero. Que casi ninguno caiga *dentro* del intervalo de confianza no es contradictorio: con `r fm(nrow(train))` intentos los intervalos son muy estrechos, y cualquier sesgo pequeño los deja fuera. Los sesgos tienen explicación:
+
+- **Precio** (`r est("log_precio")` frente a 0.60): el perfil latente es una **variable omitida**. Los clientes premium compran las zonas caras y además abandonan menos por su perfil; sin conocer el perfil, el modelo atribuye parte de esa menor tendencia al precio y subestima su efecto. Es el sesgo clásico por variable omitida correlacionada con una predictora, y motiva la sección siguiente. Lo mismo pasa, en menor medida, con el canal: la taquilla (`r est("canaltaquilla")` frente a −0.80) la usan sobre todo los clientes tradicionales, que además abandonan poco.
+- **Franjas horarias** (madrugada `r est("franjamadrugada")` frente a 0.50; noche `r est("franjanoche")` frente a 0.20): el abandono queda registrado entre 10 y 25 minutos antes de la compra posterior del mismo cliente, así que una parte de los intentos cae en una franja distinta de la que determinó su riesgo. Es un **error de medición** en la predictora, y ese tipo de error atenúa los coeficientes hacia cero.
+
+## Conexión con el clúster: el segmento por comportamiento como predictor
+
+```{r m2}
+train_c <- train |> inner_join(select(perfil, usuario_sk, segmento_modelo), by = "usuario_sk") |>
+  mutate(segmento_modelo = relevel(factor(segmento_modelo), "Ocasionales de última hora"))
+test_c  <- test |> inner_join(select(perfil, usuario_sk, segmento_modelo), by = "usuario_sk") |>
+  mutate(segmento_modelo = factor(segmento_modelo, levels = levels(train_c$segmento_modelo)))
+
+m1c <- glm(formula_base, data = train_c, family = binomial)
+m2  <- update(m1c, . ~ . + segmento_modelo)
+
+auc_c <- function(m) as.numeric(auc(roc(test_c$es_abandono, predict(m, test_c, type = "response"), quiet = TRUE)))
+lr <- anova(m1c, m2, test = "Chisq")
+beta_precio <- c(sin = coef(m1c)[["log_precio"]], con = coef(m2)[["log_precio"]])
+
+or_seg <- broom::tidy(m2) |>
+  filter(str_starts(term, "segmento_modelo")) |>
+  transmute(Segmento = str_remove(term, "segmento_modelo"), OR = exp(estimate),
+            `IC 95 % inf.` = exp(estimate - 1.96 * std.error), `IC 95 % sup.` = exp(estimate + 1.96 * std.error))
+```
+
+Para los intentos de clientes con segmento asignado (`r fm(nrow(train_c) + nrow(test_c))` intentos de clientes con dos compras o más) se compara el modelo anterior con uno que añade el **segmento del clúster**:
+
+| | Sin segmento del clúster | Con segmento del clúster |
+|---|---:|---:|
+| AIC (entrenamiento) | `r fm(AIC(m1c))` | `r fm(AIC(m2))` |
+| AUC (prueba) | `r f2(auc_c(m1c), 3)` | `r f2(auc_c(m2), 3)` |
+| β de log(precio) | `r f2(beta_precio["sin"], 3)` | `r f2(beta_precio["con"], 3)` |
+
+```{r m2-or}
+kable(or_seg, digits = 2, caption = "Razones de odds del segmento del clúster (referencia: ocasionales de última hora)")
+```
+
+La prueba de razón de verosimilitudes favorece el modelo con segmento ($\chi^2$ = `r fm(lr$Deviance[2])`, `r lr$Df[2]` g.l., p `r fp(lr[["Pr(>Chi)"]][2])`), el AIC baja y el AUC mejora. Y el coeficiente del precio pasa de `r f2(beta_precio["sin"], 3)` a `r f2(beta_precio["con"], 3)`, más cerca del 0.60 simulado: **el segmento por comportamiento recupera parte del perfil latente omitido y corrige el sesgo del precio**. Es el argumento práctico para tener los dos modelos: el de interdependencia construye una variable que el de dependencia necesita.
+
+# Conclusiones
+
+1. **Interdependencia.** Los hábitos de compra de los clientes están correlacionados de forma moderada (KMO `r f2(kmo$MSA)`); el ACP los ordena en ejes de fidelidad digital, fricción y riesgo en el pago, y sensibilidad al precio, y el k-medias sobre los componentes encuentra `r k_elegido` segmentos interpretables. Frente a la verdad del generador, el índice de Rand ajustado es `r f2(ari)`, muy por encima del segmento comercial existente (`r f2(ari_segmento)`).
+2. **Dependencia.** La regresión logística discrimina el abandono con AUC `r f2(auc_ci[2], 3)` en datos no vistos. Los factores con más peso son la espera en fila, el precio, el canal (la taquilla protege), la madrugada y el primer día de ventas; fin de semana y tipo de evento no importan. Para ver bien el efecto del primer día hay que controlar en qué momento de la ventana de venta ocurre el intento.
+3. **Juntos.** Añadir el segmento del clúster mejora la predicción y reduce el sesgo por variable omitida del precio.
+4. **Para el negocio (si los datos fueran reales):** reducir la espera en la fila y el pico del día de apertura (por ejemplo, con preventas escalonadas) atacaría los factores operativos del abandono; los cazadores de ofertas y los clientes de madrugada son el público de un recordatorio de pago o de un TTL más largo.
+
+**Limitaciones.** Los datos son sintéticos y el generador se diseñó para contener estas relaciones; el valor del ejercicio está en el método y en comprobar que los modelos recuperan lo simulado, no en las cifras. Los errores estándar ignoran la agrupación por cliente; el clúster deja fuera a los clientes de una sola compra; k-medias supone grupos esféricos y de tamaño parecido, y la silueta baja indica que la frontera entre segmentos es difusa.
+
+# Reproducibilidad
+
+```{r sesion}
+tibble(Elemento = c("R", "Semilla", "Intentos (modelo logístico)", "Clientes (ACP y clúster)", "Generador"),
+       Valor = c(R.version.string, "123 (R) y 42 (generador Python)", fm(nrow(logit_d)), fm(nrow(perfil)),
+                 "scripts/generate_synthetic.py con perfiles latentes")) |>
+  kable()
+```
+
+Para regenerar: `python main.py` (crea Bronze, Silver, Gold y la verdad de terreno) y luego `Rscript analysis/render.R` desde la raíz del repositorio.

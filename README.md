@@ -128,7 +128,11 @@ tuboleta_lakehouse/
 ├── lakehouse/
 │   ├── bronze/                   # Parquet crudo (no versionado)
 │   ├── silver/                   # Parquet limpio (no versionado)
-│   └── gold/                     # estrella: hechos y dimensiones (no versionado)
+│   ├── gold/                     # estrella: hechos y dimensiones (no versionado)
+│   └── validacion/               # perfil latente de cada usuario, solo para validar modelos (no versionado)
+├── analysis/
+│   ├── modelos_multivariados.Rmd # ACP + clúster y regresión logística sobre Gold
+│   └── render.R                  # renderiza el informe a docs/
 ├── scripts/
 │   ├── config.py                 # rutas, variables de entorno, semilla, TTL, volúmenes
 │   ├── generate_synthetic.py     # datos sintéticos del dominio
@@ -147,8 +151,11 @@ tuboleta_lakehouse/
     ├── benchmark.md
     ├── informe_final.md          # informe final (fuente versionada)
     ├── informe_final.pdf         # informe final renderizado
+    ├── modelos_multivariados.html # informe de los modelos multivariados
     └── entregables_tuboleta_lakehouse.zip  # paquete de entregables
 ```
+
+> **Nota sobre las cifras de las secciones 8 a 10.** Son las de la entrega del Taller 3 (generador original, etiqueta `taller3-entrega`). Desde entonces el generador simula comportamiento latente de los clientes (sección 12) y usa 60.000 usuarios, así que los volúmenes y resultados cambian; los actuales se regeneran con cada `python main.py` en [`docs/resultados_consultas.md`](docs/resultados_consultas.md) y [`docs/benchmark.md`](docs/benchmark.md).
 
 ## 8. Volúmenes de la última ejecución
 
@@ -192,6 +199,26 @@ Salidas completas en [`docs/resultados_consultas.md`](docs/resultados_consultas.
 - El estado de Redis (fila, locks vivos) no se analiza: no es un hecho persistido.
 
 Evolución futura (CDC con Kafka, CockroachDB real, cargas incrementales, SCD2 en usuarios): ver [`docs/diseno_dimensional.md`](docs/diseno_dimensional.md).
+
+## 12. Modelos multivariados sobre Gold
+
+[`analysis/modelos_multivariados.Rmd`](analysis/modelos_multivariados.Rmd) lee los Parquet de Gold y aplica dos modelos; el informe renderizado queda en [`docs/modelos_multivariados.html`](docs/modelos_multivariados.html).
+
+| Familia | Modelo | Pregunta |
+|---|---|---|
+| Interdependencia | ACP (KMO, Bartlett, criterio de Kaiser) + k-medias sobre los componentes | ¿Qué tipos de cliente hay? Cinco segmentos por comportamiento |
+| Dependencia | Regresión logística (abandono vs. compra) | ¿Qué condiciones de un intento aumentan el riesgo de abandono? |
+
+El segmento del clúster se escribe de vuelta en Gold (`usuario_segmento_modelo.parquet`) y entra como predictor en la logística, donde mejora el AUC y corrige el sesgo por variable omitida del precio.
+
+**Comportamiento latente en el generador.** Con el generador original las variables eran casi independientes (AUC del abandono = 0,51, el azar), así que un modelo multivariado no tenía nada que encontrar. Ahora cada usuario tiene un perfil oculto (fiel nocturno, cazador de ofertas, premium, ocasional, tradicional de taquilla) que decide a la vez su segmento, canal, zona, frecuencia, antelación, horario y velocidad de pago, y el abandono depende del precio, el canal, la hora, el día de apertura, la espera en fila y el perfil (`PERFILES` y `EFECTO_ABANDONO_*` en `scripts/generate_synthetic.py`). El perfil no llega a Bronze: se guarda en `lakehouse/validacion/perfil_latente.parquet` y el informe lo usa solo para comprobar si los modelos recuperan la estructura simulada.
+
+Requisitos: R 4.x con `tidyverse`, `arrow`, `FactoMineR`, `factoextra`, `psych`, `cluster`, `corrplot`, `car`, `pROC`, `mclust` y `rmarkdown` (con pandoc).
+
+```bash
+python main.py                  # regenera el lakehouse y la verdad de terreno
+Rscript analysis/render.R       # renderiza docs/modelos_multivariados.html
+```
 
 ## Integrantes
 
