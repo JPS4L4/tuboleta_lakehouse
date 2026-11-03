@@ -1,0 +1,15 @@
+@page { size: Letter; margin: 1.7cm 1.6cm; }
+body { font-family: "Segoe UI", Arial, sans-serif; font-size: 10pt; line-height: 1.38; color: #1a1a1a; }
+h1 { color: #0b2a5b; font-size: 18pt; border-bottom: 2px solid #0b2a5b; padding-bottom: 4px; margin-top: 0; }
+h2 { color: #0b2a5b; font-size: 13pt; margin-top: 18px; break-after: avoid; }
+.salto { break-before: page; }
+.portada { text-align: center; padding-top: 3cm; }
+.portada p { margin: 10px 0; }
+.portada-titulo { font-size: 26pt; border: none; margin: 1.2cm 0 0.6cm; }
+table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 8.6pt; break-inside: avoid; }
+th { background: #0b2a5b; color: #fff; text-align: left; }
+th, td { border: 1px solid #c9d1de; padding: 4px 6px; vertical-align: top; }
+tr:nth-child(even) td { background: #f3f6fa; }
+code { font-family: Consolas, monospace; font-size: 8.8pt; background: #eef1f5; padding: 0 3px; border-radius: 3px; }
+pre { background: #1e1e1e; color: #e6e6e6; padding: 8px 10px; border-radius: 4px; font-size: 8.3pt; white-space: pre-wrap; break-inside: avoid; }
+pre code { background: none; color: inherit; padding: 0; font-size: inherit; }
