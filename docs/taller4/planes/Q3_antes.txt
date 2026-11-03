@@ -1,0 +1,31 @@
+╭─ Summary ───────────╮
+│ Total Time: 0.0046s │
+│ Data Read: 232.2 kB │
+╰─────────────────────╯
+╭─ Hash Group By ─────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Groups: #0                                                                                                          │
+│ Aggregates: count_star(), sum(#1), sum(#2), sum(#3)                                                                 │
+│ 5 rows                                                                                                          0µs │
+╰──────────────────────────────────────────────────────────┒┎─────────────────────────────────────────────────────────╯
+╭─ Projection ─────────────────────────────────────────────┚┖─────────────────────────────────────────────────────────╮
+│ Projections:                                                                                                        │
+│ nombre_evento, CAST(es_compra AS BIGINT), CAST(es_abandono AS BIGINT), CAST(es_rechazo_unique AS BIGINT)            │
+│ 260,294 rows                                                                                                    0µs │
+╰──────────────────────────────────────────────────────────┒┎─────────────────────────────────────────────────────────╯
+╭─ Hash Join ──────────────────────────────────────────────┚┖─────────────────────────────────────────────────────────╮
+│ Join Type: INNER                                                                                                    │
+│ Conditions: evento_sk = evento_sk                                                                                   │
+│ 260,294 rows                                                                                                    0µs │
+╰──────────────────────────────────────────────────────────┰┰─────────────────────────────────────────────────────────╯
+                                                           ┃┠──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+╭─ Table Scan ─────────────────────────────────────────────┚┖─────────────────────────────────────────────────────────╮  ╭─ Table Scan ────────────────────────────────────────┴─────────────────────────────────────────────────────╮
+│ Function: READ_PARQUET                                                                                              │  │ Function: READ_PARQUET                                                                                    │
+│ Projections: evento_sk, es_compra, es_abandono, es_rechazo_unique                                                   │  │ Projections: evento_sk, nombre_evento                                                                     │
+│ Dynamic Filters:                                                                                                    │  │ Total Files Read: 1                                                                                       │
+│ optional: evento_sk IN PRF(evento_sk)                                                                               │  │ Filename(s):                                                                                              │
+│ Total Files Read: 1                                                                                                 │  │ C:\Users\devte\Documents\development\coding\personal\tuboleta_lakehouse\lakehouse\gold\dim_evento.parquet │
+│ Filename(s):                                                                                                        │  │ Row Groups Scanned: 1 / 1                                                                                 │
+│ C:\Users\devte\Documents\development\coding\personal\tuboleta_lakehouse\lakehouse\gold\fact_intentos_compra.parquet │  │ 5 rows                                                                                                0µs │
+│ Row Groups Scanned: 1 / 1                                                                                           │  ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+│ 260,294 rows                                                                                                    0µs │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

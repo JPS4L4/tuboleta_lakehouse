@@ -1,0 +1,9 @@
+total_time_ms=4.781  bytes_read=232,285  row_groups=2/2
+
+operador                                       ms  filas reales  filas estimadas
+RESULT_COLLECTOR                            0.046             0                -
+  HASH_GROUP_BY                             0.978             5                5
+    PROJECTION                              0.075       260,294           260294
+      HASH_JOIN                             0.423       260,294           260294
+        TABLE_SCAN [fact_intentos_compra]    1.225       260,294           260294
+        TABLE_SCAN [dim_evento]             0.112             5                5

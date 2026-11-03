@@ -1,0 +1,9 @@
+total_time_ms=2.421  bytes_read=0  row_groups=4/4
+
+operador                                       ms  filas reales  filas estimadas
+RESULT_COLLECTOR                            0.040             0                -
+  HASH_GROUP_BY                             4.308             5                5
+    PROJECTION                              0.238       260,294           260294
+      HASH_JOIN                             0.269       260,294           260294
+        TABLE_SCAN                          0.231       260,294           260294
+        TABLE_SCAN                          0.005             5                5

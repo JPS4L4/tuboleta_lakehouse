@@ -1,0 +1,34 @@
+╭─ Summary ───────────╮
+│ Total Time: 0.0024s │
+╰─────────────────────╯
+╭─ Hash Group By ─────────────────────────╮
+│ Groups: #0                              │
+│ Aggregates: count_star(), sum(#1),      │
+│             sum(#2), sum(#3)            │
+│ 5 rows                              0µs │
+╰────────────────────┒┎───────────────────╯
+╭─ Projection ───────┚┖───────────────────╮
+│ Projections:                            │
+│ nombre_evento,                          │
+│ CAST(es_compra AS BIGINT),              │
+│ CAST(es_abandono AS BIGINT),            │
+│ CAST(es_rechazo_unique AS BIGINT)       │
+│ 260,294 rows                        0µs │
+╰────────────────────┒┎───────────────────╯
+╭─ Hash Join ────────┚┖───────────────────╮
+│ Join Type: INNER                        │
+│ Conditions: evento_sk = evento_sk       │
+│ 260,294 rows                        0µs │
+╰────────────────────┰┰───────────────────╯
+                     ┃┠──────────────────────────────────────╮
+╭─ Table Scan ───────┚┖───────────────────╮  ╭─ Table Scan ──┴───────────────╮
+│ Table: memory.main.fact_intentos_compra │  │ Table: memory.main.dim_evento │
+│ Type: Sequential Scan                   │  │ Type: Sequential Scan         │
+│ Projections: evento_sk, es_compra,      │  │ Projections: evento_sk,       │
+│              es_abandono,               │  │              nombre_evento    │
+│              es_rechazo_unique          │  │ Row Groups Scanned: 1 / 1     │
+│ Dynamic Filters:                        │  │ 5 rows                    0µs │
+│ optional: evento_sk IN PRF(evento_sk)   │  ╰───────────────────────────────╯
+│ Row Groups Scanned: 3 / 3               │
+│ 260,294 rows                        0µs │
+╰─────────────────────────────────────────╯

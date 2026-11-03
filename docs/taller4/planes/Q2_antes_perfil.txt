@@ -1,0 +1,9 @@
+total_time_ms=2.256  bytes_read=583,659  row_groups=1/1
+
+operador                                       ms  filas reales  filas estimadas
+RESULT_COLLECTOR                            0.004             0                -
+  PROJECTION                                0.002             4                6
+    PERFECT_HASH_GROUP_BY                   0.116             4                6
+      PROJECTION                            0.005        34,039            41647
+        PROJECTION                          0.043        34,039            41647
+          TABLE_SCAN [fact_ventas_boletas]    1.040        34,039            41647
