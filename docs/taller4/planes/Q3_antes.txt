@@ -23,9 +23,9 @@
 │ Projections: evento_sk, es_compra, es_abandono, es_rechazo_unique                                                   │  │ Projections: evento_sk, nombre_evento                                                                     │
 │ Dynamic Filters:                                                                                                    │  │ Total Files Read: 1                                                                                       │
 │ optional: evento_sk IN PRF(evento_sk)                                                                               │  │ Filename(s):                                                                                              │
-│ Total Files Read: 1                                                                                                 │  │ C:\Users\devte\Documents\development\coding\personal\tuboleta_lakehouse\lakehouse\gold\dim_evento.parquet │
+│ Total Files Read: 1                                                                                                 │  │ <repo>\lakehouse\gold\dim_evento.parquet │
 │ Filename(s):                                                                                                        │  │ Row Groups Scanned: 1 / 1                                                                                 │
-│ C:\Users\devte\Documents\development\coding\personal\tuboleta_lakehouse\lakehouse\gold\fact_intentos_compra.parquet │  │ 5 rows                                                                                                0µs │
+│ <repo>\lakehouse\gold\fact_intentos_compra.parquet │  │ 5 rows                                                                                                0µs │
 │ Row Groups Scanned: 1 / 1                                                                                           │  ╰───────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 │ 260,294 rows                                                                                                    0µs │
 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

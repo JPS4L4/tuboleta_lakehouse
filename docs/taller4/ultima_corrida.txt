@@ -14,4 +14,4 @@ Método: warm-up ×3, mediana de 5 ejecuciones. Q3 antes/después medido sobre t
 | Q2 | Filtro por mes sobre un único Parquet (full scan de la fact) | I-6 particionar Hive year/month | 2.31 | 2.55 | 0.91x | carpetas leídas: 1 de 9 (partition pruning) |
 | Q3 | Sin problema de acceso: agregación simple, join con dim de 5 filas | I-2 ANALYZE (control) | 2.58 | 2.43 | 1.06x | No — plan idéntico: Hash Group By + Projection + Hash Join + Table Scan |
 
-Planes en C:\Users\devte\Documents\development\coding\personal\tuboleta_lakehouse\docs\taller4\planes
+Planes en <repo>\docs\taller4\planes

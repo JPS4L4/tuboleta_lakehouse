@@ -82,9 +82,17 @@ def mediana_ms(con, sql: str, calentamiento: int = 3, corridas: int = 5) -> floa
     return statistics.median(tiempos)
 
 
+def anonimizar(texto: str) -> str:
+    """Reemplaza la ruta absoluta del repo por <repo> para que los planes no expongan rutas locales."""
+    for variante in {str(RAIZ), RAIZ.as_posix(), str(RAIZ).replace("\\", "\\\\")}:
+        texto = texto.replace(variante, "<repo>")
+    return texto
+
+
 def guardar_plan(con, sql: str, nombre: str) -> str:
     """EXPLAIN ANALYZE completo a archivo de texto (se guarda sin interpretar, como pide el taller)."""
     texto = con.execute("EXPLAIN ANALYZE " + sql).fetchall()[0][1]
+    texto = anonimizar(texto)
     PLANES.mkdir(parents=True, exist_ok=True)
     (PLANES / f"{nombre}.txt").write_text(texto, encoding="utf-8")
     guardar_perfil(con, sql, nombre)

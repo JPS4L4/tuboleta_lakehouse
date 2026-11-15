@@ -1,6 +1,6 @@
 # TuBoleta Mini-Lakehouse
 
-Mini-Lakehouse **Bronze / Silver / Gold** (Parquet + DuckDB) para analizar la venta de boletería de TuBoleta en el Estadio Atanasio Girardot (Medellín). Taller 3 de Tópicos Avanzados en Bases de Datos, ITM.
+Mini-Lakehouse **Bronze / Silver / Gold** (Parquet + DuckDB) para analizar la venta de boletería de TuBoleta en el Estadio Atanasio Girardot (Medellín). Talleres 3 y 4 de Tópicos Avanzados en Bases de Datos, ITM (Taller 3: pipeline y modelo; Taller 4: optimización de consultas, ver sección 12).
 
 Con un solo comando (`python main.py`) el pipeline genera los datos, los limpia, los modela en estrella, ejecuta nueve consultas de negocio y mide un benchmark OLTP vs columnar.
 
@@ -79,7 +79,8 @@ El detalle de cada ejecución queda en [`docs/reporte_calidad_silver.txt`](docs/
 
 ## 4. Requisitos
 
-- Python 3.10 o superior (probado con 3.12).
+- Python 3.10 o superior para el pipeline del Taller 3 (probado con 3.12).
+- `requirements.txt` fija las versiones con las que se midió el Taller 4 (Python 3.14, DuckDB 2.0.0). Para reproducir esos números use Python 3.14; con otras versiones el pipeline funciona, pero los tiempos y el formato de los planes pueden variar.
 - Paquetes: `duckdb`, `pandas`, `pyarrow`, `numpy`, `sqlalchemy`, `psycopg2-binary` (ver `requirements.txt`).
 - **No necesita CockroachDB:** por defecto genera datos sintéticos deterministas (semilla fija: mismos datos en cada ejecución).
 
@@ -137,7 +138,10 @@ tuboleta_lakehouse/
 │   ├── transform_gold.py         # Silver -> Gold (estrella, SCD2)
 │   ├── analyze.py                # consultas de negocio (DuckDB)
 │   ├── consultar.py              # consultas en vivo sobre Gold (exposición)
-│   └── benchmark.py              # OLTP vs columnar
+│   ├── benchmark.py              # OLTP vs columnar
+│   ├── taller4_optimizacion.py   # Taller 4: planes, intervenciones I-3 / I-6 / I-2 y benchmarks
+│   ├── taller4_complementario.py # Taller 4: controles (paralelismo, Hive, ANALYZE), mediana de 15
+│   └── taller4_pdf.py            # Taller 4: renderiza el informe a PDF (requiere Edge o Chrome)
 └── docs/
     ├── diseno_dimensional.md     # las 5 preguntas, SCD2, limitaciones
     ├── modelo_dimensional.dbml   # modelo para dbdiagram.io
@@ -147,7 +151,14 @@ tuboleta_lakehouse/
     ├── benchmark.md
     ├── informe_final.md          # informe final (fuente versionada)
     ├── informe_final.pdf         # informe final renderizado
-    └── entregables_tuboleta_lakehouse.zip  # paquete de entregables
+    ├── entregables_tuboleta_lakehouse.zip  # paquete de entregables (Talleres 3 y 4)
+    └── taller4/
+        ├── diagnostico_baseline.md   # diagnóstico de Q1, Q2 y Q3
+        ├── intervenciones.md         # fichas de I-3, I-6 e I-2
+        ├── benchmarks.md             # tabla consolidada de benchmarks
+        ├── analisis_complementario.md
+        ├── informe_taller4.md / .pdf # informe técnico
+        └── planes/                   # EXPLAIN ANALYZE completos (antes y después) y perfiles por operador
 ```
 
 ## 8. Volúmenes de la última ejecución
@@ -192,6 +203,35 @@ Salidas completas en [`docs/resultados_consultas.md`](docs/resultados_consultas.
 - El estado de Redis (fila, locks vivos) no se analiza: no es un hecho persistido.
 
 Evolución futura (CDC con Kafka, CockroachDB real, cargas incrementales, SCD2 en usuarios): ver [`docs/diseno_dimensional.md`](docs/diseno_dimensional.md).
+
+## 12. Taller 4: optimización de consultas
+
+Parte del Gold del Taller 3 (sin modificarlo) y aplica el ciclo diagnóstico → intervención → medición sobre tres consultas, con DuckDB 2.0.0 sobre Parquet. Las intervenciones escriben en `lakehouse/gold_t4/`.
+
+| Query | Problema (vocabulario del taller) | Intervención | Antes (ms) | Después (ms) | Factor | ¿Cambió el plan? |
+|---|---|---|---:|---:|---:|---|
+| Q1 — Ingresos por evento, sep-2026 | Acceso secuencial sin data skipping (1 row group) | I-3: ordenar por `tiempo_sk` | 5,09 | 4,83 | 1,05x | Sí: row groups 1/1 → 3/11, 640,9 → 142,4 kB |
+| Q2 — Ingresos por zona, sep-2026 | Acceso secuencial sobre archivo único | I-6: particionado Hive `year/month` | 2,31 | 2,55 | 0,91x | Sí: archivos 1/9, 583,7 → 58,8 kB |
+| Q3 — Embudo de conversión | Ninguno (agregación total) | I-2: `ANALYZE` (control) | 2,58 | 2,43 | 1,06x | No: plan idéntico |
+
+**Lectura.** Las intervenciones redujeron los datos leídos 4,5x y 9,9x, pero con ~200.000 filas cada consulta tarda 2 a 5 ms y la mitad es costo fijo del motor, por lo que el tiempo casi no cambia. El detalle está en el informe y en las fichas.
+
+Dónde mirar:
+
+- Informe técnico: [`docs/taller4/informe_taller4.pdf`](docs/taller4/informe_taller4.pdf)
+- Diagnóstico: [`docs/taller4/diagnostico_baseline.md`](docs/taller4/diagnostico_baseline.md)
+- Intervenciones: [`docs/taller4/intervenciones.md`](docs/taller4/intervenciones.md)
+- Planes `EXPLAIN ANALYZE`: [`docs/taller4/planes/`](docs/taller4/planes)
+
+Cómo reproducirlo (genera el Gold del Taller 3 si falta):
+
+```
+python -m scripts.taller4_optimizacion     # planes, perfiles y benchmarks
+python -m scripts.taller4_complementario   # controles de paralelismo, Hive y ANALYZE
+python -m scripts.taller4_pdf              # opcional: PDF del informe (requiere Edge o Chrome)
+```
+
+Los tiempos varían entre máquinas y corridas; lo determinista (row groups, archivos, bytes leídos, operadores) es reproducible con la semilla 42.
 
 ## Integrantes
 

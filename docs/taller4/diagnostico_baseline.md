@@ -88,6 +88,12 @@ GROUP BY 1
 
 ---
 
+## Por qué `ANALYZE` (I-2) no se aplicó primero
+
+El enunciado recomienda ejecutar `ANALYZE` antes de cualquier otra intervención. En este proyecto las consultas Q1 y Q2 leen **vistas sobre Parquet**, que no tienen estadísticas propias que actualizar: `ANALYZE` no tiene objeto sobre ellas. Se probó igualmente sobre tablas materializadas y no movió la estimación de Q1 (1.651 → 1.651 en vistas; 24.037 → 24.037 en tablas; ver `analisis_complementario.md`, sección C). Por eso I-2 se aplicó solo como experimento de control en Q3.
+
+---
+
 ## Resumen del diagnóstico
 
 | Query | Baseline | Operador más costoso | Problema | Indicador | Intervención prevista |

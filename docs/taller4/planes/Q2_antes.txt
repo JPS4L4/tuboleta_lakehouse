@@ -26,7 +26,7 @@
 │ (tiempo_sk >= 2026090100) AND (tiempo_sk <= 2026093023)                                                            │
 │ Total Files Read: 1                                                                                                │
 │ Filename(s):                                                                                                       │
-│ C:\Users\devte\Documents\development\coding\personal\tuboleta_lakehouse\lakehouse\gold\fact_ventas_boletas.parquet │
+│ <repo>\lakehouse\gold\fact_ventas_boletas.parquet │
 │ Row Groups Scanned: 1 / 1                                                                                          │
 │ 34,039 rows                                                                                                    0µs │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
