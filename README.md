@@ -4,6 +4,18 @@ Mini-Lakehouse **Bronze / Silver / Gold** (Parquet + DuckDB) para analizar la ve
 
 Con un solo comando (`python main.py`) el pipeline genera los datos, los limpia, los modela en estrella, ejecuta nueve consultas de negocio y mide un benchmark OLTP vs columnar.
 
+## Alcance: qué es real y qué es simulado
+
+Este proyecto entrega la **capa analítica (OLAP)** de TuBoleta. El sistema operacional (OLTP) real usaría Redis y CockroachDB, pero queda **fuera del alcance de los talleres**: en su lugar, un generador de datos sintéticos reproduce lo que ese sistema entregaría, y todo lo que sigue (Bronze, Silver, Gold, DuckDB y las consultas) es el pipeline real.
+
+| Componente | En producción | En este proyecto |
+|---|---|---|
+| Redis | Fila virtual y locks con TTL (estado efímero) | No se ejecuta; su efecto aparece como TTL y abandonos en el generador |
+| CockroachDB | Fuente de verdad (`UNIQUE(evento, silla)` bajo `SERIALIZABLE`) | Datos sintéticos deterministas (semilla 42). Hay una rama de extracción (`USE_SYNTHETIC=false`), no probada contra un clúster |
+| Parquet + DuckDB | Capa analítica y de consulta | Se ejecuta de verdad: Bronze, Silver, Gold, consultas y Taller 4 |
+
+DuckDB **no reemplaza** a CockroachDB: es el motor de la capa analítica, que se alimenta del sistema operacional. Guía completa del proyecto en [`docs/guia_proyecto.pdf`](docs/guia_proyecto.pdf).
+
 ## 1. Dominio y proceso analizado
 
 TuBoleta vende boletería masiva. Su sistema operacional combina:
@@ -151,6 +163,7 @@ tuboleta_lakehouse/
     ├── benchmark.md
     ├── informe_final.md          # informe final (fuente versionada)
     ├── informe_final.pdf         # informe final renderizado
+    ├── guia_proyecto.pdf         # guía: qué es, cómo instalarlo, estado y propuesta de diapositivas
     ├── entregables_tuboleta_lakehouse.zip  # paquete de entregables (Talleres 3 y 4)
     └── taller4/
         ├── diagnostico_baseline.md   # diagnóstico de Q1, Q2 y Q3
@@ -177,11 +190,11 @@ Agregación: boletas e ingresos por **evento x zona x mes** (60 grupos), con 208
 
 | Motor | Fuente | Mediana (ms) | Mejora vs (a) |
 |---|---|---:|---:|
-| (a) SQLite, almacén por filas (OLTP-like) | Silver normalizado + índices típicos | 368,89 | 1,0x |
-| (b) DuckDB sobre Bronze crudo | Parquet sucio, limpieza dentro de la consulta | 67,14 | 5,5x |
-| (c) DuckDB sobre Gold (estrella) | Parquet columnar modelado | 17,57 | 21,0x |
+| (a) SQLite, almacén por filas (OLTP-like) | Silver normalizado + índices típicos | 481,31 | 1,0x |
+| (b) DuckDB sobre Bronze crudo | Parquet sucio, limpieza dentro de la consulta | 128,70 | 3,7x |
+| (c) DuckDB sobre Gold (estrella) | Parquet columnar modelado | 18,40 | 26,2x |
 
-**Análisis.** DuckDB sobre Gold fue unas 21 veces más rápido que el almacén por filas, y buena parte de la ventaja ya aparece solo por leer Parquet columnar sin modelar (5,5x en Bronze); el modelado en estrella aporta otro factor de casi 4 sobre Bronze, porque evita limpiar al vuelo y trabaja con claves enteras y dimensiones pequeñas. La comparación no es perfectamente "manzanas con manzanas": DuckDB usa varios hilos (12 en esta máquina) y SQLite solo uno, y SQLite corre en memoria con índices pensados para buscar filas, no para recorrer 208.000 ventas. Además, con este volumen todas las consultas responden en menos de medio segundo; la diferencia se vuelve decisiva a millones de filas y no cambia el resultado de negocio. Los tiempos varían unos milisegundos entre ejecuciones.
+**Análisis.** DuckDB sobre Gold fue unas 26 veces más rápido que el almacén por filas, y buena parte de la ventaja ya aparece solo por leer Parquet columnar sin modelar (3,7x en Bronze); el modelado en estrella aporta otro factor de 7 sobre Bronze, porque evita limpiar al vuelo y trabaja con claves enteras y dimensiones pequeñas. La comparación no es perfectamente "manzanas con manzanas": DuckDB usa varios hilos (12 en esta máquina) y SQLite solo uno, y SQLite corre en memoria con índices pensados para buscar filas, no para recorrer 208.000 ventas. Además, con este volumen todas las consultas responden en menos de medio segundo; la diferencia se vuelve decisiva a millones de filas y no cambia el resultado de negocio. Los tiempos dependen de la máquina y de la corrida: en la entrega del Taller 3 (20-oct) la misma comparación dio 368,89 / 67,14 / 17,57 ms (21x). Las cifras de arriba son las de `docs/benchmark.md`, la ejecución más reciente.
 
 ## 10. Resultados destacados
 
@@ -196,6 +209,7 @@ Salidas completas en [`docs/resultados_consultas.md`](docs/resultados_consultas.
 
 ## 11. Limitaciones
 
+- El alcance es la capa analítica (OLAP): Redis y CockroachDB no se ejecutan en los talleres.
 - Los datos son sintéticos y las tasas (conversión, descuentos, pago tardío) son parámetros del generador.
 - Cada ejecución reconstruye Silver y Gold (carga completa, sin incrementales).
 - `dim_usuario` es Tipo 1; historizarla (Tipo 2) queda como mejora.

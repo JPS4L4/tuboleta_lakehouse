@@ -123,6 +123,7 @@ Lo que sí es un hecho analítico es el **resultado de cada intento que el siste
 
 ## Limitaciones y evolución futura
 
+- **Alcance.** El proyecto entrega la capa analítica (OLAP). El sistema operacional (Redis y CockroachDB) no se ejecuta: lo simula el generador sintético y su comportamiento queda reflejado en el modelo (TTL, abandonos y rechazos UNIQUE).
 - **Datos sintéticos.** Los datos se generan con una semilla fija para que el pipeline sea reproducible; los patrones (picos, descuentos, abandono) son plausibles pero no reales.
 - **Carga completa.** Cada ejecución reconstruye Silver y Gold. A mayor volumen habría que pasar a **cargas incrementales** (por rango de fechas o por marca de agua).
 - **Sin captura de cambios.** La extracción es por lote. Una evolución natural es **CDC con Kafka** (Debezium sobre CockroachDB, que ofrece *changefeeds*) para alimentar Bronze casi en tiempo real.

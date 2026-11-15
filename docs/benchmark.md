@@ -8,13 +8,13 @@ Misma agregación lógica en tres motores: **boletas e ingresos por evento x zon
 - El tiempo de carga no se incluye: solo cuenta ejecutar la consulta y traer el resultado.
 - Los tres motores devuelven exactamente las mismas cifras (el pipeline lo verifica con una aserción).
 - Máquina: Windows-11-10.0.26100-SP0, 16 hilos lógicos; Python 3.13.14, DuckDB 2.0.0, SQLite 3.50.4.
-- Ejecutado: 2026-11-15 17:18.
+- Ejecutado: 2026-11-15 17:21.
 
 | Motor | Fuente | Mediana (ms) | Rango (ms) | Mejora vs (a) |
 |---|---|---:|---:|---:|
-| (a) SQLite, almacén por filas (OLTP-like) | Silver normalizado + índices | 481.31 | 472.91 - 483.11 | 1.0x |
-| (b) DuckDB sobre Bronze crudo | Parquet sucio, limpieza en la consulta | 128.70 | 126.86 - 129.32 | 3.7x |
-| (c) DuckDB sobre Gold (estrella) | Parquet columnar modelado | 18.40 | 17.23 - 18.83 | 26.2x |
+| (a) SQLite, almacén por filas (OLTP-like) | Silver normalizado + índices | 455.52 | 453.80 - 473.63 | 1.0x |
+| (b) DuckDB sobre Bronze crudo | Parquet sucio, limpieza en la consulta | 125.62 | 120.71 - 130.44 | 3.6x |
+| (c) DuckDB sobre Gold (estrella) | Parquet columnar modelado | 18.39 | 17.84 - 18.78 | 24.8x |
 
 ## Cómo leer el resultado
 

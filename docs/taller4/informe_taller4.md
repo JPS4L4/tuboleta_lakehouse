@@ -38,6 +38,8 @@ Aplicamos una corrección por consulta: ordenar el archivo por fecha en bloques 
 
 <h1 class="salto">2. Diagnóstico</h1>
 
+**Alcance y motor.** Trabajamos sobre la capa analítica del M3 (DuckDB sobre Parquet), que es el motor que usa nuestro proyecto. El sistema operacional (Redis y CockroachDB) queda fuera del alcance y lo simula un generador de datos; con un CockroachDB real, los mismos indicadores se leerían con `EXPLAIN ANALYZE` de PostgreSQL/CockroachDB.
+
 **Entorno de medición.** DuckDB 2.0.0 sobre el Gold en Parquet del M3, sin modificar · AMD Ryzen 5 9600X (12 hilos lógicos) · 15,1 GB RAM · Windows 11 Pro · Python 3.14.6. Cada tiempo es la mediana de 5 ejecuciones, después de 3 ejecuciones de calentamiento. Los planes completos están en `docs/taller4/planes/` y se regeneran con `python -m scripts.taller4_optimizacion`.
 
 **Una particularidad de DuckDB 2.0.** El árbol de `EXPLAIN ANALYZE` informa filas reales, archivos y row groups, pero muestra `0µs` en todos los operadores. Para nombrar el operador más costoso con evidencia, el script captura además el profiling JSON del motor (`profiling_mode='detailed'`), que trae el tiempo y la cardinalidad estimada de cada operador. Ese tiempo es **CPU sumada entre hilos**, no tiempo de reloj, así que se usa para comparar operadores entre sí.

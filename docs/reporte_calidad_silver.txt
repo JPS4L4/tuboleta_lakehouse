@@ -1,9 +1,9 @@
 REPORTE DE CALIDAD - CAPA SILVER
-Generado: 2026-11-15 17:18
+Generado: 2026-11-15 17:21
 ============================================================
 
 Tabla: canales
-  Archivo Bronze:        canales_20261115_1718.parquet
+  Archivo Bronze:        canales_20261115_1721.parquet
   Filas Bronze:          3
   Filas Silver:          3
   % retenido:            100.00 %
@@ -12,7 +12,7 @@ Tabla: canales
   Nulos resueltos:       0
 
 Tabla: zonas
-  Archivo Bronze:        zonas_20261115_1718.parquet
+  Archivo Bronze:        zonas_20261115_1721.parquet
   Filas Bronze:          6
   Filas Silver:          6
   % retenido:            100.00 %
@@ -22,7 +22,7 @@ Tabla: zonas
   Rango de valido_desde: 2026-01-01 a 2026-07-01
 
 Tabla: eventos
-  Archivo Bronze:        eventos_20261115_1718.parquet
+  Archivo Bronze:        eventos_20261115_1721.parquet
   Filas Bronze:          5
   Filas Silver:          5
   % retenido:            100.00 %
@@ -32,7 +32,7 @@ Tabla: eventos
   Rango de fecha_evento: 2026-04-18 a 2026-10-17
 
 Tabla: sillas
-  Archivo Bronze:        sillas_20261115_1718.parquet
+  Archivo Bronze:        sillas_20261115_1721.parquet
   Filas Bronze:          45.000
   Filas Silver:          45.000
   % retenido:            100.00 %
@@ -41,7 +41,7 @@ Tabla: sillas
   Nulos resueltos:       0
 
 Tabla: usuarios
-  Archivo Bronze:        usuarios_20261115_1718.parquet
+  Archivo Bronze:        usuarios_20261115_1721.parquet
   Filas Bronze:          150.750
   Filas Silver:          150.000
   % retenido:            99.50 %
@@ -50,7 +50,7 @@ Tabla: usuarios
   Nulos resueltos:       0
 
 Tabla: compras_confirmadas
-  Archivo Bronze:        compras_confirmadas_20261115_1718.parquet
+  Archivo Bronze:        compras_confirmadas_20261115_1721.parquet
   Filas Bronze:          210.358
   Filas Silver:          208.236
   % retenido:            98.99 %
@@ -61,7 +61,7 @@ Tabla: compras_confirmadas
   Suma de precio_pagado: Bronze 22.352.656.600 | Silver 22.126.123.800 COP
 
 Tabla: intentos_compra
-  Archivo Bronze:        intentos_compra_20261115_1718.parquet
+  Archivo Bronze:        intentos_compra_20261115_1721.parquet
   Filas Bronze:          262.936
   Filas Silver:          260.294
   % retenido:            99.00 %

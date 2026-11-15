@@ -1,6 +1,6 @@
 # Resultados de las consultas analíticas
 
-Generado por `scripts/analyze.py` (2026-11-15 17:18) sobre el esquema en estrella de Gold.
+Generado por `scripts/analyze.py` (2026-11-15 17:21) sobre el esquema en estrella de Gold.
 
 ## 1. Ingresos y boletas por evento y mes
 

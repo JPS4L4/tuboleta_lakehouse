@@ -2,7 +2,7 @@
 
 | Entorno | Valor |
 |---|---|
-| Motor | DuckDB 2.0.0 sobre Parquet (Gold del M3, sin modificar) |
+| Motor | DuckDB 2.0.0 sobre Parquet (Gold del M3, sin modificar). Capa analítica; el OLTP (Redis y CockroachDB) queda fuera del alcance y lo simula el generador |
 | Máquina | AMD Ryzen 5 9600X (6 núcleos) · 15,1 GB RAM · Windows 11 Pro · Python 3.14.6 |
 | Método | warm-up ×3, mediana de 5 ejecuciones (`scripts/taller4_optimizacion.py`) |
 | Planes crudos | `docs/taller4/planes/Qn_antes.txt` (árbol `EXPLAIN ANALYZE`) |
