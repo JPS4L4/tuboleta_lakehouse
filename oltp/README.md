@@ -9,7 +9,6 @@ Desde la raíz del repositorio:
 ```bash
 docker compose up -d
 docker compose ps
-python -m scripts.oltp.load_cockroach
 ```
 
 Consola web: http://localhost:8080
