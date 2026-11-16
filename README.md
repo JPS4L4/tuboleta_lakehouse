@@ -151,7 +151,7 @@ tuboleta_lakehouse/
 │   ├── analyze.py                # consultas de negocio (DuckDB)
 │   ├── consultar.py              # consultas en vivo sobre Gold (exposición)
 │   ├── benchmark.py              # OLTP vs columnar
-│   ├── taller4_optimizacion.py   # Taller 4: planes, intervenciones I-3 / I-6 / I-2 y benchmarks
+│   ├── taller4_optimizacion.py   # Taller 4: ordenamiento y particionado Hive
 │   ├── taller4_complementario.py # Taller 4: controles (paralelismo, Hive, ANALYZE), mediana de 15
 │   └── taller4_pdf.py            # Taller 4: renderiza el informe a PDF (requiere Edge o Chrome)
 ├── docker-compose.yml             # Nodo local CockroachDB
