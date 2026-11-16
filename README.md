@@ -154,6 +154,8 @@ tuboleta_lakehouse/
 │   ├── taller4_optimizacion.py   # Taller 4: planes, intervenciones I-3 / I-6 / I-2 y benchmarks
 │   ├── taller4_complementario.py # Taller 4: controles (paralelismo, Hive, ANALYZE), mediana de 15
 │   └── taller4_pdf.py            # Taller 4: renderiza el informe a PDF (requiere Edge o Chrome)
+├── docker-compose.yml             # Nodo local CockroachDB
+├── oltp/                           # Esquema y guía del motor transaccional
 └── docs/
     ├── diseno_dimensional.md     # las 5 preguntas, SCD2, limitaciones
     ├── modelo_dimensional.dbml   # modelo para dbdiagram.io
