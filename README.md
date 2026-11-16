@@ -209,14 +209,14 @@ Salidas completas en [`docs/resultados_consultas.md`](docs/resultados_consultas.
 
 ## 11. Limitaciones
 
-- El alcance es la capa analítica (OLAP): Redis y CockroachDB no se ejecutan en los talleres.
+- El pipeline analítico puede ejecutarse en modo sintético; el laboratorio OLTP incorpora CockroachDB local en Docker.
 - Los datos son sintéticos y las tasas (conversión, descuentos, pago tardío) son parámetros del generador.
 - Cada ejecución reconstruye Silver y Gold (carga completa, sin incrementales).
 - `dim_usuario` es Tipo 1; historizarla (Tipo 2) queda como mejora.
-- La rama de CockroachDB no se probó contra un clúster real.
+- El benchmark OLTP se ejecuta localmente y genera los planes y tiempos en el equipo de entrega; no se versionan cifras inventadas.
 - El estado de Redis (fila, locks vivos) no se analiza: no es un hecho persistido.
 
-Evolución futura (CDC con Kafka, CockroachDB real, cargas incrementales, SCD2 en usuarios): ver [`docs/diseno_dimensional.md`](docs/diseno_dimensional.md).
+Evolución futura (CDC con Kafka, cargas incrementales, SCD2 en usuarios): ver [`docs/diseno_dimensional.md`](docs/diseno_dimensional.md).
 
 ## 12. Taller 4: optimización de consultas
 
