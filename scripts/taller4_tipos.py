@@ -3,18 +3,11 @@ from __future__ import annotations
 import statistics, time
 from pathlib import Path
 import duckdb
-import pandas as pd
 
 ROOT=Path(__file__).resolve().parents[1]
-BRONZE=ROOT/"lakehouse"/"bronze"
 SILVER=ROOT/"lakehouse"/"silver"
 OUT=ROOT/"docs"/"taller4"
 PLANES=OUT/"planes"
-
-def latest(pattern):
-    files=sorted(BRONZE.glob(pattern))
-    if not files: raise FileNotFoundError(f"No existe Bronze para {pattern}. Ejecuta python main.py.")
-    return files[-1]
 
 def median(con,sql):
     con.execute(sql).fetchall()
@@ -58,7 +51,7 @@ def main():
         f"- Resultado validado en ambos escenarios: {a[0][0]:,} ventas; ingresos {a[0][1]:,.2f} COP.","",
         "| Escenario | Mediana (ms) |",
         "|---|---:|",
-        f"| Bronze texto + CAST | {before:.3f} |",
+        f"| Control VARCHAR + CAST | {before:.3f} |",
         f"| Silver TIMESTAMP | {after:.3f} |",
         f"| Factor antes/después | {before/after:.2f}x |","",
         "La conversión de tipo evita aplicar CAST fila por fila en la consulta y deja el dato tipado para filtros y operaciones temporales. El tiempo puede ser similar o incluso mayor por caché, costo de lectura, optimizaciones del motor y tamaño del conjunto; se reporta sin ocultar el resultado.",
