@@ -38,7 +38,7 @@ Aplicamos una corrección por consulta: ordenar el archivo por fecha en bloques 
 
 <h1 class="salto">2. Diagnóstico</h1>
 
-**Alcance y motor.** Trabajamos sobre la capa analítica del M3 (DuckDB sobre Parquet), que es el motor que usa nuestro proyecto. El sistema operacional (Redis y CockroachDB) queda fuera del alcance y lo simula un generador de datos; con un CockroachDB real, los mismos indicadores se leerían con `EXPLAIN ANALYZE` de PostgreSQL/CockroachDB.
+**Alcance y motor.** Este documento conserva el diagnóstico y los resultados históricos de optimización OLAP del primer corte. La entrega actual amplía el alcance: CockroachDB se incorpora como motor OLTP ejecutable y DuckDB + Parquet permanece como lakehouse analítico. La matriz final de cuatro técnicas y el nuevo experimento de tipos e índice se documentan en `experimentos_requeridos.md`; sus resultados de CockroachDB deben generarse al ejecutar el laboratorio local. Las secciones siguientes preservan la evidencia histórica de las dos intervenciones OLAP y el control ANALYZE; no representan por sí solas la matriz final de cuatro técnicas.
 
 **Entorno de medición.** DuckDB 2.0.0 sobre el Gold en Parquet del M3, sin modificar · AMD Ryzen 5 9600X (12 hilos lógicos) · 15,1 GB RAM · Windows 11 Pro · Python 3.14.6. Cada tiempo es la mediana de 5 ejecuciones, después de 3 ejecuciones de calentamiento. Los planes completos están en `docs/taller4/planes/` y se regeneran con `python -m scripts.taller4_optimizacion`.
 

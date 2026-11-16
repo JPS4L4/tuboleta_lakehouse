@@ -6,12 +6,12 @@ Con un solo comando (`python main.py`) el pipeline genera los datos, los limpia,
 
 ## Alcance: qué es real y qué es simulado
 
-Este proyecto entrega la **capa analítica (OLAP)** de TuBoleta. El sistema operacional (OLTP) real usaría Redis y CockroachDB, pero queda **fuera del alcance de los talleres**: en su lugar, un generador de datos sintéticos reproduce lo que ese sistema entregaría, y todo lo que sigue (Bronze, Silver, Gold, DuckDB y las consultas) es el pipeline real.
+Este proyecto entrega la **capa analítica (OLAP)** de TuBoleta. El sistema operacional se representa con CockroachDB para las ventas transaccionales. El modo sintético sigue disponible para reproducir el pipeline sin infraestructura. El laboratorio OLTP de CockroachDB y el benchmark de índice se documentan en [oltp/README.md](oltp/README.md); las mediciones se generan al ejecutar el experimento y no se simulan.
 
 | Componente | En producción | En este proyecto |
 |---|---|---|
 | Redis | Fila virtual y locks con TTL (estado efímero) | No se ejecuta; su efecto aparece como TTL y abandonos en el generador |
-| CockroachDB | Fuente de verdad (`UNIQUE(evento, silla)` bajo `SERIALIZABLE`) | Datos sintéticos deterministas (semilla 42). Hay una rama de extracción (`USE_SYNTHETIC=false`), no probada contra un clúster |
+| CockroachDB | Fuente de verdad (`UNIQUE(evento, silla)` bajo `SERIALIZABLE`) | Snapshot sintético reproducible cargable en CockroachDB con `python -m scripts.oltp.load_cockroach`; extracción disponible con `USE_SYNTHETIC=false` |
 | Parquet + DuckDB | Capa analítica y de consulta | Se ejecuta de verdad: Bronze, Silver, Gold, consultas y Taller 4 |
 
 DuckDB **no reemplaza** a CockroachDB: es el motor de la capa analítica, que se alimenta del sistema operacional. Guía completa del proyecto en [`docs/guia_proyecto.pdf`](docs/guia_proyecto.pdf).
@@ -89,6 +89,8 @@ Bronze es el dato crudo. Para que Silver tenga trabajo real, el generador sinté
 
 El detalle de cada ejecución queda en [`docs/reporte_calidad_silver.txt`](docs/reporte_calidad_silver.txt).
 
+**Al extraer desde CockroachDB**, el cargador aplica solo normalización estructural para respetar PK y `UNIQUE(evento, silla)`: no ejecuta Silver ni imputa `canal_id`. Por eso `NULL` llega a Bronze y el reporte de Silver registra su sustitución por `DESCONOCIDO`. Los duplicados y filas sin clave se conservan en la ruta sintética directa para probar Silver, pero no se insertan en tablas OLTP con restricciones.
+
 ## 4. Requisitos
 
 - Python 3.10 o superior para el pipeline del Taller 3 (probado con 3.12).
@@ -116,7 +118,7 @@ Variables de entorno (opcionales):
 | `USE_SYNTHETIC` | `true` | `false` extrae de CockroachDB en lugar de generar datos |
 | `DB_URL` | `postgresql://root@localhost:26257/tuboleta?sslmode=disable` | conexión SQLAlchemy usada si `USE_SYNTHETIC=false` |
 
-La rama de CockroachDB espera tablas con los mismos nombres y columnas que las de Bronze (`zonas`, `eventos`, `sillas`, `usuarios`, `canales`, `compras_confirmadas`, `intentos_compra`). No se probó contra un clúster real. Si la base no responde, el paso de extracción termina con un mensaje que sugiere el modo sintético.
+El laboratorio define las siete tablas operacionales requeridas por la extracción y un snapshot sintético se carga con `scripts/oltp/load_cockroach.py`. El benchmark de índice trabaja sobre una tabla OLTP experimental separada. La ejecución real del contenedor debe realizarse en el equipo de entrega; los tiempos no se incluyen hasta correr los experimentos.
 
 ## 6. Consultas en vivo (exposición)
 
@@ -151,9 +153,11 @@ tuboleta_lakehouse/
 │   ├── analyze.py                # consultas de negocio (DuckDB)
 │   ├── consultar.py              # consultas en vivo sobre Gold (exposición)
 │   ├── benchmark.py              # OLTP vs columnar
-│   ├── taller4_optimizacion.py   # Taller 4: planes, intervenciones I-3 / I-6 / I-2 y benchmarks
+│   ├── taller4_optimizacion.py   # Taller 4: ordenamiento y particionado Hive
 │   ├── taller4_complementario.py # Taller 4: controles (paralelismo, Hive, ANALYZE), mediana de 15
 │   └── taller4_pdf.py            # Taller 4: renderiza el informe a PDF (requiere Edge o Chrome)
+├── docker-compose.yml             # Nodo local CockroachDB
+├── oltp/                           # Esquema y guía del motor transaccional
 └── docs/
     ├── diseno_dimensional.md     # las 5 preguntas, SCD2, limitaciones
     ├── modelo_dimensional.dbml   # modelo para dbdiagram.io
@@ -209,14 +213,14 @@ Salidas completas en [`docs/resultados_consultas.md`](docs/resultados_consultas.
 
 ## 11. Limitaciones
 
-- El alcance es la capa analítica (OLAP): Redis y CockroachDB no se ejecutan en los talleres.
+- El pipeline analítico puede ejecutarse en modo sintético; el laboratorio OLTP incorpora CockroachDB local en Docker.
 - Los datos son sintéticos y las tasas (conversión, descuentos, pago tardío) son parámetros del generador.
 - Cada ejecución reconstruye Silver y Gold (carga completa, sin incrementales).
 - `dim_usuario` es Tipo 1; historizarla (Tipo 2) queda como mejora.
-- La rama de CockroachDB no se probó contra un clúster real.
+- El benchmark OLTP se ejecuta localmente y genera los planes y tiempos en el equipo de entrega; no se versionan cifras inventadas.
 - El estado de Redis (fila, locks vivos) no se analiza: no es un hecho persistido.
 
-Evolución futura (CDC con Kafka, CockroachDB real, cargas incrementales, SCD2 en usuarios): ver [`docs/diseno_dimensional.md`](docs/diseno_dimensional.md).
+Evolución futura (CDC con Kafka, cargas incrementales, SCD2 en usuarios): ver [`docs/diseno_dimensional.md`](docs/diseno_dimensional.md).
 
 ## 12. Taller 4: optimización de consultas
 
@@ -255,3 +259,46 @@ Los tiempos varían entre máquinas y corridas; lo determinista (row groups, arc
 ## Docente
 
 Roberto Carlos Rahamut Suteu — ITM 2026
+
+
+## 13. Arquitectura OLTP y laboratorio CockroachDB
+
+La arquitectura separa el motor transaccional del motor analítico:
+
+- **CockroachDB (OLTP):** persistencia de ventas confirmadas, clave primaria de compra y restricción única por evento/silla.
+- **Extracción:** lectura de las tablas operacionales hacia Bronze.
+- **Parquet:** almacenamiento columnar de las capas Bronze, Silver y Gold.
+- **DuckDB (OLAP):** consultas analíticas y experimentos de optimización del lakehouse.
+
+CockroachDB no reemplaza a DuckDB. La guía de instalación y el benchmark OLTP están en [oltp/README.md](oltp/README.md). El benchmark compara full scan contra índice compuesto por tiempo/evento y mide el costo de inserción con y sin índice. Las filas de expansión del benchmark son sintéticas y quedan aisladas del conjunto funcional del lakehouse.
+
+Para ejecutar la intervención de tipos:
+```bash
+python -m scripts.taller4_tipos
+```
+Genera la comparación de fecha texto en Bronze frente a TIMESTAMP en Silver y guarda planes y mediciones en docs/taller4.
+
+
+### Ejecución del flujo OLTP → Lakehouse
+
+```bash
+docker compose up -d
+python -m scripts.oltp.load_cockroach
+```
+
+Windows PowerShell:
+```powershell
+$env:USE_SYNTHETIC = "false"
+python main.py
+python -m scripts.taller4_tipos
+python -m scripts.oltp.benchmark_cockroach
+```
+
+Linux/macOS:
+```bash
+USE_SYNTHETIC=false python main.py
+python -m scripts.taller4_tipos
+python -m scripts.oltp.benchmark_cockroach
+```
+
+La matriz actualizada de las cuatro técnicas y los criterios de aceptación está en [docs/taller4/experimentos_requeridos.md](docs/taller4/experimentos_requeridos.md). El laboratorio CockroachDB usa datos sintéticos y debe ejecutarse localmente para generar los planes y tiempos reales.
