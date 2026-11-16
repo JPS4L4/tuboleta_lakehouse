@@ -1,4 +1,4 @@
-"""Intervencion de tipos: fecha texto en Bronze frente a TIMESTAMP en Silver."""
+"""Intervencion de tipos: fecha texto en control VARCHAR frente a TIMESTAMP en Silver."""
 from __future__ import annotations
 import statistics, time
 from pathlib import Path
@@ -25,12 +25,12 @@ def median(con,sql):
     return statistics.median(values)
 
 def main():
-    bronze=latest("compras_confirmadas_*.parquet")
     silver=SILVER/"compras_confirmadas_silver.parquet"
     if not silver.exists(): raise FileNotFoundError("Silver no existe. Ejecuta python main.py.")
     con=duckdb.connect()
-    con.execute(f"CREATE VIEW bronze AS SELECT * FROM read_parquet('{bronze.as_posix()}')")
     con.execute(f"CREATE VIEW silver AS SELECT * FROM read_parquet('{silver.as_posix()}')")
+    # Mismas filas y valores: solo se serializa la fecha como texto para aislar el tipo.
+    con.execute("CREATE VIEW bronze AS SELECT * REPLACE (CAST(fecha_compra AS VARCHAR) AS fecha_compra) FROM silver")
     # Ambos escenarios aplican el mismo intervalo temporal y devuelven conteo/ingresos.
     q_text="""SELECT COUNT(*) AS ventas, SUM(precio_pagado) AS ingresos
               FROM bronze
