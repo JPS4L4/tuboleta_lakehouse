@@ -89,6 +89,8 @@ Bronze es el dato crudo. Para que Silver tenga trabajo real, el generador sinté
 
 El detalle de cada ejecución queda en [`docs/reporte_calidad_silver.txt`](docs/reporte_calidad_silver.txt).
 
+**Al extraer desde CockroachDB**, el cargador aplica solo normalización estructural para respetar PK y `UNIQUE(evento, silla)`: no ejecuta Silver ni imputa `canal_id`. Por eso `NULL` llega a Bronze y el reporte de Silver registra su sustitución por `DESCONOCIDO`. Los duplicados y filas sin clave se conservan en la ruta sintética directa para probar Silver, pero no se insertan en tablas OLTP con restricciones.
+
 ## 4. Requisitos
 
 - Python 3.10 o superior para el pipeline del Taller 3 (probado con 3.12).
