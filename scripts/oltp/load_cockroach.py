@@ -31,9 +31,10 @@ def clean_value(value):
         pass
     return value.item() if hasattr(value,"item") else value
 
-def load_table(cur,name,df):
+def load_table(cur,name,df,conn):
     cols=list(df.columns)
     cur.execute(f"TRUNCATE TABLE {name}")
+    conn.commit()
     sql=f"INSERT INTO {name} ({','.join(cols)}) VALUES %s"
     rows=(tuple(clean_value(v) for v in row) for row in df.itertuples(index=False,name=None))
     batch=[]
@@ -41,7 +42,7 @@ def load_table(cur,name,df):
     for row in rows:
         batch.append(row)
         if len(batch)>=BATCH:
-            execute_values(cur,sql,batch,page_size=BATCH); total+=len(batch); batch=[]
+            execute_values(cur,sql,batch,page_size=BATCH); total+=len(batch); conn.commit(); batch=[]; conn.commit()
     if batch:
         execute_values(cur,sql,batch,page_size=BATCH); total+=len(batch)
     print(f"  {name}: {total:,} filas")
@@ -60,8 +61,9 @@ def main():
                 statement="\n".join(line for line in statement.splitlines()
                                     if not line.strip().startswith("--")).strip()
                 if statement: cur.execute(statement)
+            conn.commit()
             for name in config.TABLAS_OLTP:
-                load_table(cur,name,limpias[name])
+                load_table(cur,name,limpias[name],conn)
     print("\nCockroachDB listo. Para extraer desde OLTP:")
     print("  Windows PowerShell: $env:USE_SYNTHETIC='false'; python main.py")
     print("  Linux/macOS: USE_SYNTHETIC=false python main.py")
