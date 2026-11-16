@@ -10,7 +10,7 @@ CockroachDB es el motor OLTP que persiste las ventas confirmadas. La extracción
 |---|---|---|---|
 | Ordenamiento / data skipping | Parquet + DuckDB | Fact sin ordenamiento frente a Parquet ordenado por tiempo_sk | Planes Q1 y perfil de row groups |
 | Particionado Hive | Parquet + DuckDB | Un archivo frente a carpetas year/month | Plan Q2 y pruning de particiones |
-| Corrección de tipos | DuckDB | Fecha VARCHAR con CAST frente a TIMESTAMP nativo | scripts/taller4_tipos.py y planes Q3 |
+| Corrección de tipos | DuckDB | Control VARCHAR + CAST frente a TIMESTAMP nativo | scripts/taller4_tipos.py y planes Q3 |
 | Índice compuesto | CockroachDB | Full scan frente a índice (tiempo_sk, evento_sk) | benchmark_cockroach.py y EXPLAIN ANALYZE |
 
 ## Volumen y validez
