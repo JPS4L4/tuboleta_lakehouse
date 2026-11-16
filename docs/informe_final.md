@@ -219,7 +219,7 @@ Misma agregación lógica en tres motores: boletas e ingresos por **evento x zon
 - **Datos sintéticos.** Los patrones son plausibles pero no reales; las tasas son parámetros del generador.
 - **Carga completa.** Cada ejecución reconstruye Silver y Gold. A mayor volumen habría que pasar a cargas incrementales (por rango de fechas o marca de agua).
 - **Sin captura de cambios.** La extracción es por lote. Una evolución natural es CDC con Kafka (Debezium sobre los *changefeeds* de CockroachDB) para alimentar Bronze casi en tiempo real.
-- **CockroachDB real.** La rama de extracción existe (`USE_SYNTHETIC=false`) pero no se probó contra un clúster.
+- **- **CockroachDB real.** El repositorio incorpora un laboratorio local con Docker, esquema OLTP y carga reproducible de un snapshot sintético. El cargador prepara las siete tablas operacionales y permite ejecutar la extracción con `USE_SYNTHETIC=false`. El benchmark de índice es independiente del volumen funcional del lakehouse y sus resultados deben generarse en el equipo donde se ejecute CockroachDB.
 - **SCD Tipo 2 en `dim_usuario`.** Hoy es Tipo 1; historizar segmento y canal preferido permitiría analizar cómo cambia un mismo cliente.
 - **Instantánea de inventario.** Una tabla periódica de `sillas_disponibles` por zona y día introduciría una métrica semi-aditiva.
 - **Embudo parcial.** Empieza en el lock de la silla; las salidas de la fila antes de lograr un lock no se persisten y no se analizan.
