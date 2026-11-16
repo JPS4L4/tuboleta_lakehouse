@@ -108,3 +108,19 @@ El Gold original del M3 **no se modifica**: cada intervención escribe en `lakeh
 | ¿El dataset es tan pequeño que el overhead supera el beneficio? | **Sí.** Unos 2,4 ms por ejecución son overhead fijo, la mitad del tiempo total (sección A). En Q2, el costo de listar y parsear las carpetas Hive (~1,4 ms) es mayor que lo que ahorra leer menos datos (sección B). |
 | ¿La caché absorbió el efecto del ordenamiento? | **En parte.** Tras el warm-up los archivos están en la caché del sistema operativo, así que el ahorro de bytes no ahorra I/O de disco. Además, el paralelismo que habilitan los 11 row groups agrega coordinación entre hilos. Con 1 hilo, I-3 rinde 1,17x en tiempo y −35 % en CPU. |
 | ¿La selectividad era tan baja que el scan completo ya era eficiente? | **En Q3, sí:** la selectividad es del 100 % y no hay nada que saltar. En Q1 y Q2 el filtro retiene el 16,3 % y las intervenciones sí redujeron los datos leídos 4,5x y 9,9x. A esta escala, eso no se traduce en tiempo. |
+
+
+---
+
+## Actualización de alcance: matriz de cuatro técnicas solicitadas
+
+Las fichas anteriores documentan los experimentos históricos del primer corte. Para la entrega final, la intervención de `ANALYZE` queda como **control complementario**, no como sustituto de la corrección de tipos. La matriz que responde a la retroalimentación del docente es:
+
+| Técnica | Tecnología | Evidencia y ejecución |
+|---|---|---|
+| Ordenamiento / data skipping | Parquet + DuckDB | Q1: `scripts/taller4_optimizacion.py`; planes y perfiles en `docs/taller4/planes/` |
+| Particionado Hive | Parquet + DuckDB | Q2: `scripts/taller4_optimizacion.py`; carpetas year/month y pruning |
+| Corrección de tipos VARCHAR → TIMESTAMP | DuckDB | Q3: `python -m scripts.taller4_tipos`; resultados en `intervencion_tipos.md` |
+| Índice compuesto (tiempo_sk, evento_sk) | CockroachDB | Q4: `python -m scripts.oltp.benchmark_cockroach`; resultados en `benchmarks_cockroach.md` |
+
+Los nuevos resultados no se incorporan como cifras anticipadas: ejecutar los scripts para generar tiempos y planes reales. La matriz completa, el método y los criterios de aceptación están en `experimentos_requeridos.md`.
