@@ -117,6 +117,15 @@ def main():
     preparadas, resumen = preparar_snapshot_oltp(tablas)
 
     print("Preparación estructural (sin limpieza Silver ni imputación de canal):")
+    # Guardas explícitas: si desaparecen los NULL antes de persistir, abortar
+    # en el cargador en lugar de producir un reporte Silver engañoso.
+    for tabla in ("compras_confirmadas", "intentos_compra"):
+        nulos = resumen[tabla]["canal_id_null"]
+        if nulos <= 0:
+            raise RuntimeError(
+                f"{tabla}: se esperaban NULL de canal_id en el snapshot sintético, "
+                f"pero se encontraron {nulos}. Revisa generate_synthetic.py."
+            )
     for nombre, stats in resumen.items():
         print(
             f"  {nombre}: entrada={stats['entrada']:,}, cargadas={stats['cargadas']:,}, "
