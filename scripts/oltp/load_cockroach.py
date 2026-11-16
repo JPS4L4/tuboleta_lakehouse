@@ -16,8 +16,12 @@ BATCH=5000
 
 def ensure_database():
     admin=config.DB_URL.replace("/tuboleta?","/defaultdb?").replace("/tuboleta","/defaultdb")
-    with psycopg2.connect(admin) as conn:
+    conn=psycopg2.connect(admin)
+    conn.autocommit=True
+    try:
         with conn.cursor() as cur: cur.execute("CREATE DATABASE IF NOT EXISTS tuboleta")
+    finally:
+        conn.close()
 
 def clean_value(value):
     if value is None: return None
