@@ -103,7 +103,7 @@ def main():
     before=median_query(engine,query)
     with engine.begin() as conn:
         conn.execute(text(f"CREATE INDEX {INDEX} ON fact_ventas_boletas (tiempo_sk,evento_sk) STORING (precio_pagado)"))
-    indexed=query.replace("FROM fact_ventas_boletas",f"FROM fact_ventas_boletas@{INDEX}")
+    indexed=query.replace("FROM fact_ventas_boletas",f"FROM fact_ventas_boletas@{{FORCE_INDEX={INDEX}}}")
     plan_after=capture_plan(engine,indexed,"cockroach_Q1_despues_index_scan.txt")
     after=median_query(engine,indexed)
     insert_without=statistics.median([measure_insert(False) for _ in range(3)])
