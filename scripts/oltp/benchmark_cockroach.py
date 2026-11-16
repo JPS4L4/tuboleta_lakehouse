@@ -45,7 +45,9 @@ def load_fact(base):
         with conn.cursor() as cur:
             cur.execute("TRUNCATE TABLE fact_ventas_boletas")
             cur.execute(f"DROP INDEX IF EXISTS {INDEX}")
-            for rows in batches(base,N_ROWS,"BENCH"): execute_values(cur,INSERT_SQL,rows,page_size=BATCH)
+            for rows in batches(base,N_ROWS,"BENCH"):
+                execute_values(cur,INSERT_SQL,rows,page_size=BATCH)
+                conn.commit()
     return (time.perf_counter()-started)*1000
 
 def capture_plan(engine,sql,filename):
