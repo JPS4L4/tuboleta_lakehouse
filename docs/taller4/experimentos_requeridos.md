@@ -17,6 +17,10 @@ El flujo correcto de canal_id es:
 
 El miembro desconocido preserva la integridad referencial sin inventar el canal original. El reporte de Silver debe mostrar los nulos realmente resueltos en esa ejecución. En modo sintético directo, Bronze también contiene duplicados y filas sin clave; en la fuente CockroachDB esas anomalías estructurales se eliminan antes de insertar porque las restricciones OLTP no permiten almacenarlas. La tasa de nulos de canal sí se conserva en ambos recorridos.
 
+### Estado de validación de la última ejecución compartida
+
+La ejecución del 16-11-2026 completó extracción, Silver, Gold y análisis, pero el reporte mostró `Nulos resueltos: 0` tanto para `compras_confirmadas` como para `intentos_compra`. Aunque Gold generó el miembro `DESCONOCIDO`, ese resultado no demuestra que se haya imputado un NULL en Silver: también puede haber valores literales `DESCONOCIDO` en la fuente. Por tanto, esta corrida no se considera evidencia de la conservación de nulos. El cargador incorpora ahora dos controles: conteo de nulos en los DataFrames antes de insertar y consulta `IS NULL` en CockroachDB después de insertar. La validación se acepta solo cuando ambos conteos coinciden y Silver registra esos nulos como resueltos. Es necesario actualizar la rama local, recargar CockroachDB y volver a ejecutar `main.py` antes de cerrar el informe.
+
 ## Las cuatro técnicas solicitadas
 
 | Técnica | Motor/capa | Comparación | Evidencia |
