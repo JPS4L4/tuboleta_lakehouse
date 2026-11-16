@@ -51,9 +51,9 @@ def main():
     before=median(con,q_text); after=median(con,q_typed)
     OUT.mkdir(parents=True,exist_ok=True)
     md=["# Intervención de tipos — texto frente a TIMESTAMP","",
-        f"- Fuente Bronze: {bronze.name}",
-        "- Antes: fecha almacenada como texto; la consulta convierte con CAST para comparar.",
-        "- Después: Silver almacena fecha_compra como TIMESTAMP; el predicado opera directamente sobre el tipo temporal.",
+        f"- Control: mismas filas Silver; fecha_compra se serializa como VARCHAR.",
+        "- Antes: fecha serializada como VARCHAR; la consulta convierte con CAST para comparar.",
+        "- Después: Silver conserva fecha_compra como TIMESTAMP; el predicado opera directamente sobre el tipo temporal.",
         "- Método: calentamiento y mediana de 9 ejecuciones en la misma conexión DuckDB.",
         f"- Resultado validado en ambos escenarios: {a[0][0]:,} ventas; ingresos {a[0][1]:,.2f} COP.","",
         "| Escenario | Mediana (ms) |",
