@@ -82,7 +82,15 @@ def measure_insert(indexed):
         conn.commit()
     return (time.perf_counter()-started)*1000
 
+def ensure_database():
+    # DB_URL apunta a tuboleta; crearla desde defaultdb antes de abrir conexiones de trabajo.
+    admin_url=DB_URL.replace("/tuboleta?", "/defaultdb?")
+    with psycopg2.connect(admin_url) as conn:
+        with conn.cursor() as cur:
+            cur.execute("CREATE DATABASE IF NOT EXISTS tuboleta")
+
 def main():
+    ensure_database()
     print(f"Preparando {N_ROWS:,} filas experimentales...")
     base=load_source()
     with psycopg2.connect(DB_URL) as conn:
