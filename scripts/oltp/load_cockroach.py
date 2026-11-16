@@ -148,6 +148,18 @@ def main():
             for name in config.TABLAS_OLTP:
                 load_table(cur, name, preparadas[name], conn)
 
+            # Comprobar en la propia base que los NULL llegaron a persistirse.
+            for tabla in ("compras_confirmadas", "intentos_compra"):
+                cur.execute(f"SELECT COUNT(*) FROM {tabla} WHERE canal_id IS NULL")
+                nulos_db = int(cur.fetchone()[0])
+                esperados = resumen[tabla]["canal_id_null"]
+                print(f"  Verificación SQL {tabla}.canal_id IS NULL: {nulos_db:,}")
+                if nulos_db != esperados:
+                    raise RuntimeError(
+                        f"{tabla}: CockroachDB almacenó {nulos_db} NULL, "
+                        f"pero el snapshot contenía {esperados}."
+                    )
+
     print("\nCockroachDB listo. canal_id NULL se conserva para que Silver lo resuelva.")
     print("  Windows PowerShell: $env:USE_SYNTHETIC='false'; python main.py")
     print("  Linux/macOS: USE_SYNTHETIC=false python main.py")
