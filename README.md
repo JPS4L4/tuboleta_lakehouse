@@ -6,7 +6,7 @@ Con un solo comando (`python main.py`) el pipeline genera los datos, los limpia,
 
 ## Alcance: qué es real y qué es simulado
 
-Este proyecto entrega la **capa analítica (OLAP)** de TuBoleta. El sistema operacional (OLTP) real usaría Redis y CockroachDB, pero queda **fuera del alcance de los talleres**: en su lugar, un generador de datos sintéticos reproduce lo que ese sistema entregaría, y todo lo que sigue (Bronze, Silver, Gold, DuckDB y las consultas) es el pipeline real.
+Este proyecto entrega la **capa analítica (OLAP)** de TuBoleta. El sistema operacional se representa con CockroachDB para las ventas transaccionales. El modo sintético sigue disponible para reproducir el pipeline sin infraestructura. El laboratorio OLTP de CockroachDB y el benchmark de índice se documentan en [oltp/README.md](oltp/README.md); las mediciones se generan al ejecutar el experimento y no se simulan.
 
 | Componente | En producción | En este proyecto |
 |---|---|---|
@@ -255,3 +255,21 @@ Los tiempos varían entre máquinas y corridas; lo determinista (row groups, arc
 ## Docente
 
 Roberto Carlos Rahamut Suteu — ITM 2026
+
+
+## 13. Arquitectura OLTP y laboratorio CockroachDB
+
+La arquitectura separa el motor transaccional del motor analítico:
+
+- **CockroachDB (OLTP):** persistencia de ventas confirmadas, clave primaria de compra y restricción única por evento/silla.
+- **Extracción:** lectura de las tablas operacionales hacia Bronze.
+- **Parquet:** almacenamiento columnar de las capas Bronze, Silver y Gold.
+- **DuckDB (OLAP):** consultas analíticas y experimentos de optimización del lakehouse.
+
+CockroachDB no reemplaza a DuckDB. La guía de instalación y el benchmark OLTP están en [oltp/README.md](oltp/README.md). El benchmark compara full scan contra índice compuesto por tiempo/evento y mide el costo de inserción con y sin índice. Las filas de expansión del benchmark son sintéticas y quedan aisladas del conjunto funcional del lakehouse.
+
+Para ejecutar la intervención de tipos:
+```bash
+python -m scripts.taller4_tipos
+```
+Genera la comparación de fecha texto en Bronze frente a TIMESTAMP en Silver y guarda planes y mediciones en docs/taller4.
