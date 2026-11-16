@@ -11,7 +11,7 @@ Este proyecto entrega la **capa analítica (OLAP)** de TuBoleta. El sistema oper
 | Componente | En producción | En este proyecto |
 |---|---|---|
 | Redis | Fila virtual y locks con TTL (estado efímero) | No se ejecuta; su efecto aparece como TTL y abandonos en el generador |
-| CockroachDB | Fuente de verdad (`UNIQUE(evento, silla)` bajo `SERIALIZABLE`) | Datos sintéticos deterministas (semilla 42). Hay una rama de extracción (`USE_SYNTHETIC=false`), no probada contra un clúster |
+| CockroachDB | Fuente de verdad (`UNIQUE(evento, silla)` bajo `SERIALIZABLE`) | Snapshot sintético reproducible cargable en CockroachDB con `python -m scripts.oltp.load_cockroach`; extracción disponible con `USE_SYNTHETIC=false` |
 | Parquet + DuckDB | Capa analítica y de consulta | Se ejecuta de verdad: Bronze, Silver, Gold, consultas y Taller 4 |
 
 DuckDB **no reemplaza** a CockroachDB: es el motor de la capa analítica, que se alimenta del sistema operacional. Guía completa del proyecto en [`docs/guia_proyecto.pdf`](docs/guia_proyecto.pdf).
@@ -116,7 +116,7 @@ Variables de entorno (opcionales):
 | `USE_SYNTHETIC` | `true` | `false` extrae de CockroachDB en lugar de generar datos |
 | `DB_URL` | `postgresql://root@localhost:26257/tuboleta?sslmode=disable` | conexión SQLAlchemy usada si `USE_SYNTHETIC=false` |
 
-La rama de CockroachDB espera tablas con los mismos nombres y columnas que las de Bronze (`zonas`, `eventos`, `sillas`, `usuarios`, `canales`, `compras_confirmadas`, `intentos_compra`). No se probó contra un clúster real. Si la base no responde, el paso de extracción termina con un mensaje que sugiere el modo sintético.
+El laboratorio define las siete tablas operacionales requeridas por la extracción y un snapshot sintético se carga con `scripts/oltp/load_cockroach.py`. El benchmark de índice trabaja sobre una tabla OLTP experimental separada. La ejecución real del contenedor debe realizarse en el equipo de entrega; los tiempos no se incluyen hasta correr los experimentos.
 
 ## 6. Consultas en vivo (exposición)
 
@@ -273,3 +273,28 @@ Para ejecutar la intervención de tipos:
 python -m scripts.taller4_tipos
 ```
 Genera la comparación de fecha texto en Bronze frente a TIMESTAMP en Silver y guarda planes y mediciones en docs/taller4.
+
+
+### Ejecución del flujo OLTP → Lakehouse
+
+```bash
+docker compose up -d
+python -m scripts.oltp.load_cockroach
+```
+
+Windows PowerShell:
+```powershell
+$env:USE_SYNTHETIC = "false"
+python main.py
+python -m scripts.taller4_tipos
+python -m scripts.oltp.benchmark_cockroach
+```
+
+Linux/macOS:
+```bash
+USE_SYNTHETIC=false python main.py
+python -m scripts.taller4_tipos
+python -m scripts.oltp.benchmark_cockroach
+```
+
+La matriz actualizada de las cuatro técnicas y los criterios de aceptación está en [docs/taller4/experimentos_requeridos.md](docs/taller4/experimentos_requeridos.md). El laboratorio CockroachDB usa datos sintéticos y debe ejecutarse localmente para generar los planes y tiempos reales.
