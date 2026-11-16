@@ -148,6 +148,10 @@ Hay eventos cuya ventana de ventas cruza el 1 de julio, así que un mismo evento
 
 En `compras_confirmadas` la suma de `precio_pagado` baja de 22.352.656.600 COP en Bronze a 22.126.123.800 COP en Silver: la diferencia son los duplicados y las filas sin clave, que inflaban los ingresos.
 
+**Alcance de esta tabla.** Estos conteos corresponden a la ejecución del generador sintético conectada directamente a Bronze, donde se conservan duplicados y filas sin clave para probar Silver. No deben atribuirse a la extracción desde CockroachDB: el cargador OLTP elimina previamente las filas que violarían claves primarias o la restricción única por evento/silla, pero conserva los nulos de `canal_id`. En ese segundo recorrido, Bronze debe mostrar esos nulos y Silver debe imputarlos a `DESCONOCIDO`; el contador exacto se obtiene del archivo `docs/reporte_calidad_silver.txt` generado en la ejecución entregable.
+
+**Separación de responsabilidades.** El cargador de CockroachDB no invoca `limpiar_tabla()`: únicamente normaliza identificadores y aplica las restricciones estructurales indispensables para insertar. La imputación de calidad ocurre en Silver, donde se registra el número de valores nulos resueltos. `DESCONOCIDO` es un miembro válido de `dim_canal` para preservar integridad referencial, no una categoría de canal inferida.
+
 **Volúmenes de Gold.**
 
 | Tabla | Filas |
@@ -219,7 +223,7 @@ Misma agregación lógica en tres motores: boletas e ingresos por **evento x zon
 - **Datos sintéticos.** Los patrones son plausibles pero no reales; las tasas son parámetros del generador.
 - **Carga completa.** Cada ejecución reconstruye Silver y Gold. A mayor volumen habría que pasar a cargas incrementales (por rango de fechas o marca de agua).
 - **Sin captura de cambios.** La extracción es por lote. Una evolución natural es CDC con Kafka (Debezium sobre los *changefeeds* de CockroachDB) para alimentar Bronze casi en tiempo real.
-- **CockroachDB real.** El repositorio incorpora un laboratorio local con Docker, esquema OLTP y carga reproducible de un snapshot sintético. El cargador prepara las siete tablas operacionales y permite ejecutar la extracción con `USE_SYNTHETIC=false`. El benchmark de índice es independiente del volumen funcional del lakehouse y sus resultados deben generarse en el equipo donde se ejecute CockroachDB.
+- **CockroachDB de laboratorio.** El repositorio incorpora un nodo local Docker y un snapshot sintético reproducible. La preparación OLTP conserva `canal_id=NULL`; Bronze mantiene el dato y Silver lo imputa a `DESCONOCIDO`. Las cifras de calidad de la tabla anterior son de la ruta sintética directa, no de la extracción CockroachDB. El benchmark del índice es independiente del volumen funcional y sus tiempos deben generarse en el equipo de entrega.
 - **SCD Tipo 2 en `dim_usuario`.** Hoy es Tipo 1; historizar segmento y canal preferido permitiría analizar cómo cambia un mismo cliente.
 - **Instantánea de inventario.** Una tabla periódica de `sillas_disponibles` por zona y día introduciría una métrica semi-aditiva.
 - **Embudo parcial.** Empieza en el lock de la silla; las salidas de la fila antes de lograr un lock no se persisten y no se analizan.
