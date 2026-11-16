@@ -3,7 +3,6 @@
 Después de cargar, ejecutar USE_SYNTHETIC=false para que scripts.extract lea CockroachDB.
 """
 from __future__ import annotations
-import os
 from pathlib import Path
 import pandas as pd
 import psycopg2
@@ -16,7 +15,7 @@ SCHEMA=ROOT/"oltp"/"init"/"01_schema.sql"
 BATCH=5000
 
 def ensure_database():
-    admin=config.DB_URL.replace("/tuboleta?","/defaultdb?")
+    admin=config.DB_URL.replace("/tuboleta?","/defaultdb?").replace("/tuboleta","/defaultdb")
     with psycopg2.connect(admin) as conn:
         with conn.cursor() as cur: cur.execute("CREATE DATABASE IF NOT EXISTS tuboleta")
 
