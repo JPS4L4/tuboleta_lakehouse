@@ -202,13 +202,13 @@ Se ejecutan nueve consultas de negocio sobre Gold con DuckDB (`scripts/analyze.p
 
 Misma agregación lógica en tres motores: boletas e ingresos por **evento x zona x mes** (60 grupos, 208.236 ventas). No se mide la carga; se hace un calentamiento y se toma la mediana de 5 corridas. Los tres motores devuelven exactamente las mismas cifras (verificado con una aserción). Máquina: Windows 11, 12 hilos lógicos, Python 3.12.10, DuckDB 1.5.6, SQLite 3.49.1.
 
-| Motor | Fuente | Mediana (ms) | Rango (ms) | Mejora vs (a) |
-|---|---|---:|---:|---:|
-| (a) SQLite, almacén por filas (OLTP-like) | Silver normalizado + índices típicos | 368,89 | 354,60 - 386,53 | 1,0x |
-| (b) DuckDB sobre Bronze crudo | Parquet sucio, limpieza en la consulta | 67,14 | 59,98 - 71,66 | 5,5x |
-| (c) DuckDB sobre Gold (estrella) | Parquet columnar modelado | 17,57 | 14,21 - 19,23 | 21,0x |
+| Motor | Fuente | Medición actual (ms) | Mejora vs (a) |
+|---|---|---:|---:|
+| (a) SQLite, almacén por filas (OLTP-like) | Silver normalizado + índices típicos | 427,23 | 1,0x |
+| (b) DuckDB sobre Bronze crudo | Parquet sucio, limpieza en la consulta | 162,61 | 2,6x |
+| (c) DuckDB sobre Gold (estrella) | Parquet columnar modelado | 14,23 | 30,0x |
 
-**Análisis.** DuckDB sobre Gold fue unas 21 veces más rápido que el almacén por filas. Buena parte de la ventaja ya aparece solo por leer Parquet columnar sin modelar (5,5x en Bronze); el modelado en estrella aporta otro factor de casi 4 sobre Bronze, porque evita limpiar al vuelo y trabaja con claves enteras y dimensiones pequeñas.
+**Análisis.** En la ejecución más reciente, DuckDB sobre Gold fue 30 veces más rápido que SQLite para esta agregación; Bronze crudo fue 2,6 veces más rápido. Gold fue aproximadamente 11,4 veces más rápido que Bronze, coherente con el beneficio adicional de evitar limpieza al vuelo y consultar claves enteras y dimensiones pequeñas. Estos valores corresponden al benchmark del pipeline analítico ejecutado por `main.py`, no al experimento de índice de CockroachDB. Se reporta la medición de esta ejecución y no se mezclan rangos de corridas anteriores.
 
 **Salvedades honestas.**
 
@@ -223,7 +223,7 @@ Misma agregación lógica en tres motores: boletas e ingresos por **evento x zon
 - **Datos sintéticos.** Los patrones son plausibles pero no reales; las tasas son parámetros del generador.
 - **Carga completa.** Cada ejecución reconstruye Silver y Gold. A mayor volumen habría que pasar a cargas incrementales (por rango de fechas o marca de agua).
 - **Sin captura de cambios.** La extracción es por lote. Una evolución natural es CDC con Kafka (Debezium sobre los *changefeeds* de CockroachDB) para alimentar Bronze casi en tiempo real.
-- **CockroachDB de laboratorio.** El repositorio incorpora un nodo local Docker y un snapshot sintético reproducible. La preparación OLTP conserva `canal_id=NULL`; Bronze mantiene el dato y Silver lo imputa a `DESCONOCIDO`. Las cifras de calidad de la tabla anterior son de la ruta sintética directa, no de la extracción CockroachDB. El benchmark del índice es independiente del volumen funcional y sus tiempos deben generarse en el equipo de entrega.
+- **CockroachDB de laboratorio.** El repositorio incorpora un nodo local Docker y un snapshot sintético reproducible. El diseño del cargador conserva `canal_id=NULL` y ahora verifica el conteo tanto antes como después de insertar. La ejecución reportada el 16-11-2026 todavía mostró cero nulos resueltos en Silver; por eso la conservación efectiva en CockroachDB/Bronze queda pendiente de repetir con el cargador actualizado. Las cifras de calidad de la tabla anterior son de la ruta sintética directa, no de la extracción CockroachDB. El benchmark del índice es independiente del volumen funcional y sus tiempos deben generarse en el equipo de entrega.
 - **SCD Tipo 2 en `dim_usuario`.** Hoy es Tipo 1; historizar segmento y canal preferido permitiría analizar cómo cambia un mismo cliente.
 - **Instantánea de inventario.** Una tabla periódica de `sillas_disponibles` por zona y día introduciría una métrica semi-aditiva.
 - **Embudo parcial.** Empieza en el lock de la silla; las salidas de la fila antes de lograr un lock no se persisten y no se analizan.

@@ -1,6 +1,6 @@
 # Resultados de las consultas analíticas
 
-Generado por `scripts/analyze.py` (2026-11-15 17:21) sobre el esquema en estrella de Gold.
+Generado por `scripts/analyze.py` (2026-11-16 23:19) sobre el esquema en estrella de Gold.
 
 ## 1. Ingresos y boletas por evento y mes
 
@@ -102,8 +102,8 @@ Generado por `scripts/analyze.py` (2026-11-15 17:21) sobre el esquema en estrell
 
 | zona_sk | nombre_zona | precio_base | valido_desde | valido_hasta | boletas | ingresos | ticket_promedio | descuento_promedio |
 |---|---|---|---|---|---|---|---|---|
-| 1 | VIP | 250.000 | 2026-01-01 | 2026-06-30 | 5.834 | 1.411.662.500 | 241.972 | 8.028 |
-| 2 | VIP | 280.000 | 2026-07-01 | 9999-12-31 | 8.041 | 2.186.856.000 | 271.963 | 8.037 |
+| 5 | VIP | 250.000 | 2026-01-01 | 2026-06-30 | 5.834 | 1.411.662.500 | 241.972 | 8.028 |
+| 6 | VIP | 280.000 | 2026-07-01 | 9999-12-31 | 8.041 | 2.186.856.000 | 271.963 | 8.037 |
 
 ## 7. Tiempo hasta el pago por zona (promedio, mediana y p95)
 

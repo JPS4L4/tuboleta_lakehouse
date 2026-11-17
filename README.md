@@ -89,7 +89,7 @@ Bronze es el dato crudo. Para que Silver tenga trabajo real, el generador sinté
 
 El detalle de cada ejecución queda en [`docs/reporte_calidad_silver.txt`](docs/reporte_calidad_silver.txt).
 
-**Al extraer desde CockroachDB**, el cargador aplica solo normalización estructural para respetar PK y `UNIQUE(evento, silla)`: no ejecuta Silver ni imputa `canal_id`. Por eso `NULL` llega a Bronze y el reporte de Silver registra su sustitución por `DESCONOCIDO`. Los duplicados y filas sin clave se conservan en la ruta sintética directa para probar Silver, pero no se insertan en tablas OLTP con restricciones.
+**Las rutas de ejecución no deben confundirse.** En modo sintético directo (`USE_SYNTHETIC=true`), Bronze contiene duplicados, filas sin clave y NULL de `canal_id`; Silver demuestra su limpieza e imputación. En modo CockroachDB (`USE_SYNTHETIC=false`), la extracción refleja lo almacenado. Una corrida anterior no tenía NULL, pero la repetición verificada de las 23:19 conservó 3.101 NULL de compras y 3.906 de intentos en CockroachDB y Bronze; Silver los imputó como `DESCONOCIDO`. La base contiene el snapshot sintético del laboratorio, no ventas reales. Los conteos y corridas se separan en [docs/taller4/ejecuciones_pipeline.md](docs/taller4/ejecuciones_pipeline.md).
 
 ## 4. Requisitos
 
@@ -109,7 +109,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-`main.py` corre extracción, Silver, Gold y análisis; imprime el tiempo de cada paso y termina con código 1 si alguno falla. Tarda unos 8 segundos. Los Parquet no se versionan: se regeneran en cada ejecución. Cada paso también se puede correr solo, por ejemplo `python -m scripts.transform_silver`.
+`main.py` corre extracción, Silver, Gold y análisis; imprime el tiempo de cada paso y termina con código 1 si alguno falla. Las corridas medidas tardaron alrededor de 10 segundos en este entorno. Los Parquet no se versionan: se regeneran en cada ejecución. Cada paso también se puede correr solo, por ejemplo `python -m scripts.transform_silver`.
 
 Variables de entorno (opcionales):
 
@@ -118,7 +118,7 @@ Variables de entorno (opcionales):
 | `USE_SYNTHETIC` | `true` | `false` extrae de CockroachDB en lugar de generar datos |
 | `DB_URL` | `postgresql://root@localhost:26257/tuboleta?sslmode=disable` | conexión SQLAlchemy usada si `USE_SYNTHETIC=false` |
 
-El laboratorio define las siete tablas operacionales requeridas por la extracción y un snapshot sintético se carga con `scripts/oltp/load_cockroach.py`. El benchmark de índice trabaja sobre una tabla OLTP experimental separada. La ejecución real del contenedor debe realizarse en el equipo de entrega; los tiempos no se incluyen hasta correr los experimentos.
+El laboratorio define las siete tablas operacionales requeridas por la extracción y un snapshot sintético se carga con `scripts/oltp/load_cockroach.py`. La ruta CockroachDB se verificó con `USE_SYNTHETIC=false`. El benchmark de índice trabaja sobre una tabla OLTP experimental separada. Las mediciones y sus límites están documentados en [docs/taller4/benchmarks_cockroach.md](docs/taller4/benchmarks_cockroach.md) y [docs/taller4/intervencion_tipos.md](docs/taller4/intervencion_tipos.md).
 
 ## 6. Consultas en vivo (exposición)
 
@@ -194,11 +194,11 @@ Agregación: boletas e ingresos por **evento x zona x mes** (60 grupos), con 208
 
 | Motor | Fuente | Mediana (ms) | Mejora vs (a) |
 |---|---|---:|---:|
-| (a) SQLite, almacén por filas (OLTP-like) | Silver normalizado + índices típicos | 481,31 | 1,0x |
-| (b) DuckDB sobre Bronze crudo | Parquet sucio, limpieza dentro de la consulta | 128,70 | 3,7x |
-| (c) DuckDB sobre Gold (estrella) | Parquet columnar modelado | 18,40 | 26,2x |
+| (a) SQLite, almacén por filas (OLTP-like) | Silver normalizado + índices típicos | 444,01 | 1,0x |
+| (b) DuckDB sobre Bronze crudo | Parquet sucio, limpieza dentro de la consulta | 169,22 | 2,6x |
+| (c) DuckDB sobre Gold (estrella) | Parquet columnar modelado | 16,97 | 26,2x |
 
-**Análisis.** DuckDB sobre Gold fue unas 26 veces más rápido que el almacén por filas, y buena parte de la ventaja ya aparece solo por leer Parquet columnar sin modelar (3,7x en Bronze); el modelado en estrella aporta otro factor de 7 sobre Bronze, porque evita limpiar al vuelo y trabaja con claves enteras y dimensiones pequeñas. La comparación no es perfectamente "manzanas con manzanas": DuckDB usa varios hilos (12 en esta máquina) y SQLite solo uno, y SQLite corre en memoria con índices pensados para buscar filas, no para recorrer 208.000 ventas. Además, con este volumen todas las consultas responden en menos de medio segundo; la diferencia se vuelve decisiva a millones de filas y no cambia el resultado de negocio. Los tiempos dependen de la máquina y de la corrida: en la entrega del Taller 3 (20-oct) la misma comparación dio 368,89 / 67,14 / 17,57 ms (21x). Las cifras de arriba son las de `docs/benchmark.md`, la ejecución más reciente.
+**Análisis.** DuckDB sobre Gold fue unas 26 veces más rápido que el almacén por filas, y parte de la ventaja aparece al leer Parquet columnar sin modelar (2,6x en Bronze); el modelado en estrella aporta otro factor de 10 sobre Bronze, porque evita limpiar al vuelo y trabaja con claves enteras y dimensiones pequeñas. La comparación no es perfectamente "manzanas con manzanas": DuckDB usa varios hilos y SQLite solo uno; SQLite corre en memoria con índices pensados para buscar filas, no para recorrer 208.000 ventas. Los tiempos dependen de la máquina y de la corrida. Las cifras de arriba son las de `docs/benchmark.md`, ejecutadas el 16-11-2026 23:20.
 
 ## 10. Resultados destacados
 
@@ -217,7 +217,7 @@ Salidas completas en [`docs/resultados_consultas.md`](docs/resultados_consultas.
 - Los datos son sintéticos y las tasas (conversión, descuentos, pago tardío) son parámetros del generador.
 - Cada ejecución reconstruye Silver y Gold (carga completa, sin incrementales).
 - `dim_usuario` es Tipo 1; historizarla (Tipo 2) queda como mejora.
-- El benchmark OLTP se ejecuta localmente y genera los planes y tiempos en el equipo de entrega; no se versionan cifras inventadas.
+- Las mediciones OLTP están ejecutadas en un CockroachDB local de un solo nodo y sobre filas experimentales sintéticas; no representan una instalación distribuida ni rendimiento de producción.
 - El estado de Redis (fila, locks vivos) no se analiza: no es un hecho persistido.
 
 Evolución futura (CDC con Kafka, cargas incrementales, SCD2 en usuarios): ver [`docs/diseno_dimensional.md`](docs/diseno_dimensional.md).
@@ -301,4 +301,4 @@ python -m scripts.taller4_tipos
 python -m scripts.oltp.benchmark_cockroach
 ```
 
-La matriz actualizada de las cuatro técnicas y los criterios de aceptación está en [docs/taller4/experimentos_requeridos.md](docs/taller4/experimentos_requeridos.md). El laboratorio CockroachDB usa datos sintéticos y debe ejecutarse localmente para generar los planes y tiempos reales.
+La matriz de las cuatro técnicas y los criterios de aceptación está en [docs/taller4/experimentos_requeridos.md](docs/taller4/experimentos_requeridos.md). Las salidas medidas, los planes y las limitaciones del laboratorio están en [docs/taller4/estado_evidencia.md](docs/taller4/estado_evidencia.md).

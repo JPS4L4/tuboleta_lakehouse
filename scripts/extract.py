@@ -11,11 +11,11 @@ Fuentes:
 """
 from __future__ import annotations
 
+from contextlib import closing
 from datetime import datetime
 
 import pandas as pd
-from sqlalchemy import create_engine
-from sqlalchemy.exc import SQLAlchemyError
+import psycopg2
 
 from scripts import config, generate_synthetic
 
@@ -23,10 +23,15 @@ from scripts import config, generate_synthetic
 def extraer_cockroachdb() -> dict[str, pd.DataFrame]:
     """Lee las tablas operacionales de CockroachDB con `SELECT *`."""
     try:
-        motor = create_engine(config.DB_URL)
-        with motor.connect() as conexion:
-            return {t: pd.read_sql_query(f"SELECT * FROM {t}", conexion) for t in config.TABLAS_OLTP}
-    except SQLAlchemyError as error:
+        tablas = {}
+        with closing(psycopg2.connect(config.DB_URL)) as conexion:
+            for tabla in config.TABLAS_OLTP:
+                with conexion.cursor() as cursor:
+                    cursor.execute(f"SELECT * FROM {tabla}")
+                    columnas = [columna.name for columna in cursor.description]
+                    tablas[tabla] = pd.DataFrame.from_records(cursor.fetchall(), columns=columnas)
+        return tablas
+    except psycopg2.Error as error:
         raise RuntimeError(
             "No se pudo leer CockroachDB con DB_URL. Verifica que la base esté arriba o usa el modo "
             f"sintético (USE_SYNTHETIC=true). Detalle: {type(error).__name__}"
