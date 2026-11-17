@@ -48,4 +48,4 @@ El benchmark OLTP usa por defecto 1.000.000 de filas experimentales (`OLTP_BENCH
 - El informe PDF tiene 9 páginas (máximo permitido: 10).
 - El ZIP final reúne código, documentación y evidencias.
 - Las mediciones son locales y el snapshot de CockroachDB es sintético; no deben presentarse como resultados de producción ni ventas reales.
-- El PR se mantiene en Draft hasta completar la publicación y verificación final de los entregables.
+- El PR #2 fue cerrado y fusionado en `main`. El informe PDF y el ZIP están publicados en `docs/taller4/informe_taller4.pdf` y `docs/entregables_tuboleta_lakehouse.zip`, respectivamente. La presencia de ambos archivos está verificada en el repositorio; la revisión del contenido interno del ZIP y el recuento independiente de páginas del PDF deben considerarse verificaciones de entrega separadas.
