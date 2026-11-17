@@ -89,7 +89,7 @@ Bronze es el dato crudo. Para que Silver tenga trabajo real, el generador sinté
 
 El detalle de cada ejecución queda en [`docs/reporte_calidad_silver.txt`](docs/reporte_calidad_silver.txt).
 
-**Al extraer desde CockroachDB**, el cargador aplica solo normalización estructural para respetar PK y `UNIQUE(evento, silla)`: no ejecuta Silver ni imputa `canal_id`. Por eso `NULL` llega a Bronze y el reporte de Silver registra su sustitución por `DESCONOCIDO`. Los duplicados y filas sin clave se conservan en la ruta sintética directa para probar Silver, pero no se insertan en tablas OLTP con restricciones.
+**Las rutas de ejecución no deben confundirse.** En modo sintético directo (`USE_SYNTHETIC=true`), Bronze contiene duplicados, filas sin clave y NULL de `canal_id`; Silver demuestra su limpieza e imputación. En modo CockroachDB (`USE_SYNTHETIC=false`), el snapshot se prepara para cumplir las restricciones OLTP y la extracción refleja los valores realmente almacenados. La corrida CockroachDB compartida reportó cero NULL de canal en Bronze/Silver, por lo que no demuestra imputación en esa ruta. Los conteos de ambas corridas están separados en [docs/taller4/ejecuciones_pipeline.md](docs/taller4/ejecuciones_pipeline.md).
 
 ## 4. Requisitos
 
