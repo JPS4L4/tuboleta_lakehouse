@@ -8,18 +8,20 @@ CockroachDB es el motor OLTP que persiste el snapshot operacional. La extracció
 
 El generador introduce suciedad intencional para probar la calidad de datos. La carga a CockroachDB realiza únicamente la preparación estructural indispensable para cumplir el esquema OLTP: recorta espacios en identificadores, descarta filas que incumplen columnas obligatorias y elimina duplicados que violarían la PK o la restricción UNIQUE(evento_id, silla_id). No ejecuta la limpieza completa de Silver y no reemplaza los valores nulos de canal_id.
 
-El flujo correcto de canal_id es:
+El tratamiento debe describirse por ruta de ejecución, porque las fuentes no contienen necesariamente las mismas anomalías:
 
-1. Fuente sintética → CockroachDB: el campo acepta NULL y esos NULL se conservan.
-2. CockroachDB → Bronze: la extracción lleva el NULL sin imputarlo.
-3. Bronze → Silver: limpiar_tabla() cuenta los nulos y los imputa como DESCONOCIDO.
-4. Silver → Gold: dim_canal contiene el miembro especial DESCONOCIDO y los hechos resuelven su clave sustituta.
+- **Sintético directo (`USE_SYNTHETIC=true`):** Bronze incluye duplicados, filas sin clave y NULL de `canal_id`; Silver deduplica, descarta filas sin clave e imputa los NULL como `DESCONOCIDO`.
+- **CockroachDB (`USE_SYNTHETIC=false`):** la carga OLTP aplica preparación estructural para cumplir PK/UNIQUE/NOT NULL. La extracción conserva lo que realmente está almacenado en CockroachDB; Silver solo puede imputar los NULL que efectivamente reciba.
+- **Gold:** `dim_canal` incluye el miembro especial `DESCONOCIDO` para resolver referencias sin canal conocido. La presencia de esa fila dimensional no demuestra por sí sola que se haya imputado un NULL en Silver.
 
-El miembro desconocido preserva la integridad referencial sin inventar el canal original. El reporte de Silver debe mostrar los nulos realmente resueltos en esa ejecución. En modo sintético directo, Bronze también contiene duplicados y filas sin clave; en la fuente CockroachDB esas anomalías estructurales se eliminan antes de insertar porque las restricciones OLTP no permiten almacenarlas. La tasa de nulos de canal sí se conserva en ambos recorridos.
+### Estado de validación de las ejecuciones compartidas (16-11-2026)
 
-### Estado de validación de la última ejecución compartida
+Se compartieron dos corridas distintas:
 
-La ejecución del 16-11-2026 completó extracción, Silver, Gold y análisis, pero el reporte mostró `Nulos resueltos: 0` tanto para `compras_confirmadas` como para `intentos_compra`. Aunque Gold generó el miembro `DESCONOCIDO`, ese resultado no demuestra que se haya imputado un NULL en Silver: también puede haber valores literales `DESCONOCIDO` en la fuente. Por tanto, esta corrida no se considera evidencia de la conservación de nulos. El cargador incorpora ahora dos controles: conteo de nulos en los DataFrames antes de insertar y consulta `IS NULL` en CockroachDB después de insertar. La validación se acepta solo cuando ambos conteos coinciden y Silver registra esos nulos como resueltos. Es necesario actualizar la rama local, recargar CockroachDB y volver a ejecutar `main.py` antes de cerrar el informe.
+- **Sintético directo:** Bronze tenía 210.358 compras y 262.936 intentos. Silver conservó 208.236 compras y 260.294 intentos; imputó 3.101 NULL de `canal_id` en compras y 3.906 en intentos, además de deduplicar y descartar registros sin clave.
+- **CockroachDB como fuente:** Bronze y Silver reportaron 208.236 compras y 260.294 intentos, con cero duplicados, cero filas descartadas y cero NULL resueltos. Esta corrida no demuestra imputación de NULL en la ruta CockroachDB, pero tampoco contradice la prueba sintética directa: se trata de entradas diferentes.
+
+El cargador de CockroachDB incorpora controles de conteo de NULL en DataFrame antes de insertar y consulta `IS NULL` después de insertar. Para demostrar preservación de NULL a través de CockroachDB se debe compartir la salida de esos controles y una ejecución posterior de `main.py` donde Silver registre los NULL resueltos. No se debe afirmar que esa validación ocurrió basándose únicamente en la corrida CockroachDB con cero NULL. El detalle de conteos y tiempos está en [ejecuciones_pipeline.md](ejecuciones_pipeline.md).
 
 ## Las cuatro técnicas solicitadas
 
