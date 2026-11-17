@@ -8,20 +8,23 @@ CockroachDB es el motor OLTP que persiste el snapshot operacional. La extracció
 
 El generador introduce suciedad intencional para probar la calidad de datos. La carga a CockroachDB realiza únicamente la preparación estructural indispensable para cumplir el esquema OLTP: recorta espacios en identificadores, descarta filas que incumplen columnas obligatorias y elimina duplicados que violarían la PK o la restricción UNIQUE(evento_id, silla_id). No ejecuta la limpieza completa de Silver y no reemplaza los valores nulos de canal_id.
 
-El flujo correcto de canal_id es:
+El tratamiento debe describirse por ruta de ejecución, porque las fuentes no contienen necesariamente las mismas anomalías:
 
-1. Fuente sintética → CockroachDB: el campo acepta NULL y esos NULL se conservan.
-2. CockroachDB → Bronze: la extracción lleva el NULL sin imputarlo.
-3. Bronze → Silver: limpiar_tabla() cuenta los nulos y los imputa como DESCONOCIDO.
-4. Silver → Gold: dim_canal contiene el miembro especial DESCONOCIDO y los hechos resuelven su clave sustituta.
+- **Sintético directo (`USE_SYNTHETIC=true`):** Bronze incluye duplicados, filas sin clave y NULL de `canal_id`; Silver deduplica, descarta filas sin clave e imputa los NULL como `DESCONOCIDO`.
+- **CockroachDB (`USE_SYNTHETIC=false`):** la carga OLTP aplica preparación estructural para cumplir PK/UNIQUE/NOT NULL. La extracción conserva lo que realmente está almacenado en CockroachDB; Silver solo puede imputar los NULL que efectivamente reciba.
+- **Gold:** `dim_canal` incluye el miembro especial `DESCONOCIDO` para resolver referencias sin canal conocido. La presencia de esa fila dimensional no demuestra por sí sola que se haya imputado un NULL en Silver.
 
-El miembro desconocido preserva la integridad referencial sin inventar el canal original. El reporte de Silver debe mostrar los nulos realmente resueltos en esa ejecución. En modo sintético directo, Bronze también contiene duplicados y filas sin clave; en la fuente CockroachDB esas anomalías estructurales se eliminan antes de insertar porque las restricciones OLTP no permiten almacenarlas. La tasa de nulos de canal sí se conserva en ambos recorridos.
+### Estado de validación de las ejecuciones compartidas (16-11-2026)
 
-### Estado de validación operacional
+### Estado de validación de las ejecuciones (16-11-2026)
 
-La corrida del 16-11-2026 23:19 ejecutó `main.py` con `USE_SYNTHETIC=false` contra CockroachDB v25.4.0. Se verificó que las siete tablas Bronze tienen `_fuente=cockroachdb`. La consulta SQL directa y Bronze coincidieron: `compras_confirmadas` 208.236 filas / 3.101 NULL de `canal_id`; `intentos_compra` 260.294 / 3.906 NULL. Silver resolvió esos mismos NULL como `DESCONOCIDO`. Esto valida CockroachDB → Bronze → Silver. El origen fue el snapshot sintético cargado por el laboratorio; no son ventas reales.
+- **Sintético directo:** Bronze tenía 210.358 compras y 262.936 intentos. Silver conservó 208.236 compras y 260.294 intentos; imputó 3.101 NULL de `canal_id` en compras y 3.906 en intentos, además de deduplicar y descartar registros sin clave.
+- **CockroachDB, corrida anterior:** se documentó una extracción con cero NULL resueltos. Esa ejecución por sí sola no demostraba la imputación en la ruta OLTP.
+- **CockroachDB, corrida verificada de las 23:19:** `main.py` se ejecutó con `USE_SYNTHETIC=false` contra CockroachDB v25.4.0. Las siete tablas Bronze quedaron marcadas `_fuente=cockroachdb`. SQL directo y Bronze coincidieron: `compras_confirmadas` 208.236 filas / 3.101 NULL de `canal_id`; `intentos_compra` 260.294 / 3.906 NULL. Silver resolvió esos mismos NULL como `DESCONOCIDO`. Esto valida CockroachDB → Bronze → Silver.
 
-Las mediciones de índice e inserciones están en `benchmarks_cockroach.md` y `planes/cockroach_Q1_*.txt`; las de tipos, en `intervencion_tipos.md` y `planes/Q3_tipos_*.txt`. Son mediciones locales sobre datos experimentales, no resultados de producción. Para usar datos reales de TuBoleta hace falta importarlos a las siete tablas operacionales del esquema antes de ejecutar el pipeline; el repositorio no incluye ese origen real.
+El snapshot cargado en CockroachDB fue generado por el cargador sintético del laboratorio. La ejecución valida conexión, transporte y calidad del flujo, pero no usa ventas reales de TuBoleta. El detalle de ambas rutas está en [ejecuciones_pipeline.md](ejecuciones_pipeline.md).
+
+Las mediciones de índice e inserciones están en `benchmarks_cockroach.md` y `planes/cockroach_Q1_*.txt`; las de tipos, en `intervencion_tipos.md` y `planes/Q3_tipos_*.txt`. Son mediciones locales sobre datos experimentales, no resultados de producción. Para usar datos reales de TuBoleta hace falta importarlos a las siete tablas operacionales; el repositorio no incluye ese origen real.
 
 ## Las cuatro técnicas solicitadas
 
