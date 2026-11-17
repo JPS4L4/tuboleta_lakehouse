@@ -73,11 +73,11 @@ Cada fila corresponde a una ejecución independiente del benchmark SQLite frente
 
 | Motor | Sintético directo (ms) | CockroachDB como fuente (ms) |
 |---|---:|---:|
-| SQLite | 457,94 | 441,25 |
-| DuckDB Bronze | 115,77 | 155,67 |
-| DuckDB Gold | 16,36 | 16,15 |
+| SQLite | 447,10 | 441,25 |
+| DuckDB Bronze | 112,30 | 155,67 |
+| DuckDB Gold | 15,68 | 16,15 |
 | DuckDB Bronze vs SQLite | 4,0x | 2,8x |
-| DuckDB Gold vs SQLite | 28,0x | 27,3x |
+| DuckDB Gold vs SQLite | 28,5x | 27,3x |
 
 Las cifras comparan el tiempo de consulta analítica sobre los conjuntos producidos por cada ruta; no miden el tiempo de carga de CockroachDB ni el costo de extracción. No deben presentarse como benchmark del índice OLTP.
 
@@ -85,11 +85,11 @@ Las cifras comparan el tiempo de consulta analítica sobre los conjuntos produci
 
 | Etapa | Sintético directo | CockroachDB como fuente |
 |---|---:|---:|
-| Extracción / generación Bronze | 2,39 s | 2,16 s |
-| Bronze → Silver | 0,82 s | 0,55 s |
-| Silver → Gold | 1,60 s | 1,62 s |
-| Análisis | 6,26 s | 6,31 s |
-| **Total** | **11,06 s** | **10,64 s** |
+| Extracción / generación Bronze | 2,29 s | 2,16 s |
+| Bronze → Silver | 0,68 s | 0,55 s |
+| Silver → Gold | 1,49 s | 1,62 s |
+| Análisis | 5,92 s | 6,31 s |
+| **Total** | **10,38 s** | **10,64 s** |
 
 Son tiempos de las corridas compartidas en el entorno local, no garantías de rendimiento para otras máquinas.
 
