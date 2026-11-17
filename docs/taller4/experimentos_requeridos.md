@@ -14,8 +14,6 @@ El tratamiento debe describirse por ruta de ejecución, porque las fuentes no co
 - **CockroachDB (`USE_SYNTHETIC=false`):** la carga OLTP aplica preparación estructural para cumplir PK/UNIQUE/NOT NULL. La extracción conserva lo que realmente está almacenado en CockroachDB; Silver solo puede imputar los NULL que efectivamente reciba.
 - **Gold:** `dim_canal` incluye el miembro especial `DESCONOCIDO` para resolver referencias sin canal conocido. La presencia de esa fila dimensional no demuestra por sí sola que se haya imputado un NULL en Silver.
 
-### Estado de validación de las ejecuciones compartidas (16-11-2026)
-
 ### Estado de validación de las ejecuciones (16-11-2026)
 
 - **Sintético directo:** Bronze tenía 210.358 compras y 262.936 intentos. Silver conservó 208.236 compras y 260.294 intentos; imputó 3.101 NULL de `canal_id` en compras y 3.906 en intentos, además de deduplicar y descartar registros sin clave.
