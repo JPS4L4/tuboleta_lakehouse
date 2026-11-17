@@ -17,9 +17,11 @@ El flujo correcto de canal_id es:
 
 El miembro desconocido preserva la integridad referencial sin inventar el canal original. El reporte de Silver debe mostrar los nulos realmente resueltos en esa ejecución. En modo sintético directo, Bronze también contiene duplicados y filas sin clave; en la fuente CockroachDB esas anomalías estructurales se eliminan antes de insertar porque las restricciones OLTP no permiten almacenarlas. La tasa de nulos de canal sí se conserva en ambos recorridos.
 
-### Estado de validación de la última ejecución compartida
+### Estado de validación operacional
 
-La ejecución del 16-11-2026 completó extracción, Silver, Gold y análisis, pero el reporte mostró `Nulos resueltos: 0` tanto para `compras_confirmadas` como para `intentos_compra`. Aunque Gold generó el miembro `DESCONOCIDO`, ese resultado no demuestra que se haya imputado un NULL en Silver: también puede haber valores literales `DESCONOCIDO` en la fuente. Por tanto, esta corrida no se considera evidencia de la conservación de nulos. El cargador incorpora ahora dos controles: conteo de nulos en los DataFrames antes de insertar y consulta `IS NULL` en CockroachDB después de insertar. La validación se acepta solo cuando ambos conteos coinciden y Silver registra esos nulos como resueltos. Es necesario actualizar la rama local, recargar CockroachDB y volver a ejecutar `main.py` antes de cerrar el informe.
+La corrida del 16-11-2026 23:19 ejecutó `main.py` con `USE_SYNTHETIC=false` contra CockroachDB v25.4.0. Se verificó que las siete tablas Bronze tienen `_fuente=cockroachdb`. La consulta SQL directa y Bronze coincidieron: `compras_confirmadas` 208.236 filas / 3.101 NULL de `canal_id`; `intentos_compra` 260.294 / 3.906 NULL. Silver resolvió esos mismos NULL como `DESCONOCIDO`. Esto valida CockroachDB → Bronze → Silver. El origen fue el snapshot sintético cargado por el laboratorio; no son ventas reales.
+
+Las mediciones de índice e inserciones están en `benchmarks_cockroach.md` y `planes/cockroach_Q1_*.txt`; las de tipos, en `intervencion_tipos.md` y `planes/Q3_tipos_*.txt`. Son mediciones locales sobre datos experimentales, no resultados de producción. Para usar datos reales de TuBoleta hace falta importarlos a las siete tablas operacionales del esquema antes de ejecutar el pipeline; el repositorio no incluye ese origen real.
 
 ## Las cuatro técnicas solicitadas
 
@@ -42,11 +44,13 @@ Se recomienda ejecutar 1.000.000 de filas como escenario principal y repetir con
 # 1. Construir Bronze, Silver y Gold funcionales
 python main.py
 
-# 2. Levantar CockroachDB local y cargar el snapshot operacional
+# 2. (Opcional) cargar el snapshot sintético reproducible del laboratorio
 docker compose up -d
 docker compose ps
 python -m scripts.oltp.load_cockroach
 
+# El cargador anterior genera datos sintéticos. Para datos reales, importa primero
+# el origen propio en las siete tablas operacionales del esquema CockroachDB.
 # 3. Extraer desde CockroachDB y validar la calidad en Silver
 # Windows PowerShell:
 $env:USE_SYNTHETIC = "false"
@@ -74,6 +78,8 @@ python -m scripts.oltp.benchmark_cockroach
 - El plan anterior muestra lectura completa de la tabla o ausencia de un rango selectivo sobre tiempo_sk.
 - El plan posterior muestra el índice compuesto solicitado. El script usa FORCE_INDEX para que la comparación mida ese acceso; además conserva el plan real.
 - Se mide la inserción sobre una tabla aislada con y sin índice secundario, con el mismo lote.
+- Resultados medidos: la mediana de consulta CockroachDB fue 687,713 ms sin índice y 331,261 ms con índice; la inserción de 20.000 filas pasó de 460,19 a 508,56 ms. No son mediciones de producción.
+- En DuckDB, VARCHAR + CAST dio 19,887 ms frente a 4,996 ms con TIMESTAMP (3,98x); ambos escenarios devolvieron 34.039 filas y 3.689.715.500 COP.
 - Se conserva el resultado de tipos aunque el tiempo no mejore: una diferencia pequeña o negativa debe analizarse, no ocultarse.
 - Tras la carga CockroachDB, el NULL de canal_id debe seguir presente en Bronze y el contador de Silver debe ser mayor que cero. Silver debe dejar cero nulos en esa columna después de imputar DESCONOCIDO.
 - Los tiempos son resultados locales reproducibles, no cifras universales.

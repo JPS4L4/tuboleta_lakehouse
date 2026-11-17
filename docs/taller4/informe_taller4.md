@@ -38,7 +38,7 @@ Aplicamos una corrección por consulta: ordenar el archivo por fecha en bloques 
 
 <h1 class="salto">2. Diagnóstico</h1>
 
-**Alcance y motor.** Este documento conserva el diagnóstico y los resultados históricos de optimización OLAP del primer corte. La entrega actual amplía el alcance: CockroachDB se incorpora como motor OLTP ejecutable y DuckDB + Parquet permanece como lakehouse analítico. La matriz final de cuatro técnicas y el nuevo experimento de tipos e índice se documentan en `experimentos_requeridos.md`; sus resultados de CockroachDB deben generarse al ejecutar el laboratorio local. Las secciones siguientes preservan la evidencia histórica de las dos intervenciones OLAP y el control ANALYZE; no representan por sí solas la matriz final de cuatro técnicas.
+**Alcance y motor.** Este documento conserva el diagnóstico y los resultados históricos de optimización OLAP del primer corte y añade la corrección de tipos en DuckDB y el índice compuesto en CockroachDB. DuckDB + Parquet es el lakehouse analítico; CockroachDB es el motor OLTP. Las mediciones de CockroachDB son ejecuciones locales sobre filas experimentales reproducibles, no ventas reales ni resultados de producción.
 
 **Entorno de medición.** DuckDB 2.0.0 sobre el Gold en Parquet del M3, sin modificar · AMD Ryzen 5 9600X (12 hilos lógicos) · 15,1 GB RAM · Windows 11 Pro · Python 3.14.6. Cada tiempo es la mediana de 5 ejecuciones, después de 3 ejecuciones de calentamiento. Los planes completos están en `docs/taller4/planes/` y se regeneran con `python -m scripts.taller4_optimizacion`.
 
@@ -222,21 +222,30 @@ Sobre vistas de Parquet `ANALYZE` no tiene estadísticas propias que actualizar,
 
 **Lectura honesta.** Las dos intervenciones con diagnóstico real hicieron lo que la teoría predice sobre el acceso: 4,5x y 9,9x menos datos leídos. Ninguna se tradujo en una mejora de tiempo significativa, por razones identificadas y medidas: el overhead fijo, el costo de coordinar el paralelismo y el costo del glob y las rutas Hive. El control (Q3) dio el resultado nulo esperado.
 
+## 4.1 Resultados medidos de tipos e índice
+
+| Experimento | Antes | Después | Hallazgo |
+|---|---:|---:|---|
+| CockroachDB: mediana de consulta (7 ejecuciones) | 687,713 ms | 331,261 ms | 2,08x más rápida con el índice compuesto |
+| CockroachDB: `EXPLAIN ANALYZE` (una ejecución) | Full scan: 1.000.000 filas, 73 MiB; 983 ms | Índice: 163.137 filas, 9,7 MiB; 404 ms | El plan cambia a rango por `tiempo_sk` |
+| CockroachDB: inserción de 20.000 filas (mediana de 3) | 460,19 ms | 508,56 ms | El índice añade 10,5 % al tiempo de inserción (1,11x) |
+| DuckDB: filtro `VARCHAR` + `CAST` frente a `TIMESTAMP` | 19,887 ms | 4,996 ms | 3,98x más rápida; mismo resultado |
+
+En CockroachDB, la mediana de consulta mide siete ejecuciones con el resultado consumido; los tiempos de los planes son ejecuciones instrumentadas independientes y no se comparan como medianas. El plan anterior lee la tabla completa; el posterior usa `idx_fact_ventas_tiempo_evento`. El costo de lectura menor tiene como contrapartida más trabajo al insertar. Los planes completos y la tabla de resultados están en `planes/cockroach_Q1_antes_full_scan.txt`, `planes/cockroach_Q1_despues_index_scan.txt` y `benchmarks_cockroach.md`.
+
+La comparación de tipos usa las mismas 208.236 filas de Silver, serializando `fecha_compra` como texto solo en la vista de control. Ambos casos devuelven 34.039 ventas y 3.689.715.500 COP. Antes, el plan evalúa `CAST(fecha_compra AS TIMESTAMP)` en un filtro sobre el scan; después, el predicado temporal se empuja al `TABLE_SCAN` de Parquet. Los planes están en `planes/Q3_tipos_antes_texto.txt` y `planes/Q3_tipos_despues_timestamp.txt`; los tiempos son medianas de nueve ejecuciones, no los tiempos de una sola captura `EXPLAIN ANALYZE`.
+
+**Alcance de los datos.** Los tiempos anteriores son mediciones reales de las ejecuciones locales guardadas en los artefactos. El benchmark CockroachDB expande determinísticamente filas del Gold hasta un millón y usa otra tabla aislada para medir inserciones; esas filas son sintéticas y no representan transacciones reales. La comparación VARCHAR/TIMESTAMP también usa Silver. En la ejecución de `main.py` del 16-11-2026 23:19 se seleccionó `USE_SYNTHETIC=false`: las siete tablas Bronze quedaron marcadas `_fuente=cockroachdb`. Una consulta directa a CockroachDB v25.4.0 confirmó 208.236 compras con 3.101 NULL y 260.294 intentos con 3.906 NULL; Bronze conservó esos conteos y Silver los imputó. Sin embargo, la base fue cargada con el snapshot sintético del laboratorio, por lo que esto valida la conexión y el flujo de calidad, no datos reales ni rendimiento de producción.
+
 <h1 class="salto">5. Reflexión arquitectural</h1>
 
 *Si pudiéramos rediseñar el pipeline del M3 sabiendo lo que sabemos ahora, ¿qué cambiaríamos?*
 
-**1. El orden físico del Gold es una decisión de diseño, no una optimización posterior.** `transform_gold.py` escribe cada tabla con `df.to_parquet(ruta, index=False)`, sin ordenamiento ni `row_group_size`. Eso deja la fact en un único row group sin orden, lo que anula a la vez el data skipping y el paralelismo del scan. Ordenar por `tiempo_sk` y fijar el tamaño de row group cuesta un `sort_values` en una carga que ya tarda 1 segundo, y su beneficio crece con el volumen. Lo incorporaríamos al pipeline desde el inicio. El tamaño de row group, eso sí, debe elegirse para el volumen real: 20.000 filas sirvió para demostrar el mecanismo, pero a esta escala el paralelismo que habilita cuesta más de lo que ahorra. El valor del enunciado (100.000) o el que DuckDB usa por defecto (unas 122.000 filas) es más razonable cuando la fact crezca a millones.
+**1. Diseñar el acceso según las consultas.** Ordenar Gold por `tiempo_sk` permite data skipping en Q1; filtrar directamente por esa clave evita depender de un join para seleccionar fechas. En la prueba, el orden redujo los bytes leídos 4,5x, aunque el tiempo apenas cambió por el tamaño del conjunto y el overhead fijo. Conviene particionar solo cuando el volumen por partición compense el costo de listar archivos; aquí el glob Hive incluso hizo que Q2 fuera 9 % más lento.
 
-**2. El modelo dimensional ya tenía la herramienta, pero las consultas no la usaban.** `tiempo_sk = YYYYMMDDHH` es un entero que preserva el orden cronológico, así que permite filtrar rangos de fecha directamente en la fact (como Q2) sin pasar por `dim_tiempo`. Aun así, las consultas que escribimos en el M3 filtran a través del join (como Q1). DuckDB compensa en parte con filtros dinámicos, pero depende de una optimización del motor. Un filtro directo sobre la clave es explícito y portable a otros motores. En un motor con índices (PostgreSQL o CockroachDB, nuestro OLTP de talleres anteriores), `tiempo_sk` sería la clave foránea candidata a un índice, y su formato ordenado la hace ideal para un índice B-tree de rango.
+**2. Balancear lectura y escritura.** En CockroachDB, el índice compuesto hizo la consulta 2,08x más rápida, pero elevó 10,5 % el tiempo mediano de insertar 20.000 filas. El índice es útil cuando el beneficio de las lecturas selectivas compensa ese costo; el resultado es de un laboratorio local, no una predicción de producción.
 
-**3. Nuestras consultas no siguen la clave de ordenamiento.** De las 9 consultas de `analyze.py`, solo una tiene `WHERE` (y filtra por zona, no por tiempo). Las demás agregan la tabla completa con `FILTER` dentro del `SELECT`. Para ese patrón, el data skipping por fecha no aporta nada, porque no hay ningún bloque que se pueda saltar. La clave de ordenamiento y la de partición deben elegirse por los filtros reales de las consultas. Si el uso real es un tablero mensual, `tiempo_sk` es la clave correcta. Si es un reporte histórico completo, el beneficio vendría de otra técnica: pre-agregaciones.
-
-**4. Particionar no es gratis, y a nuestra escala es contraproducente.** I-6 demostró que el partition pruning funciona, pero también que cada archivo tiene un costo fijo y que el planner pierde estadísticas al leer por glob. Con 208.000 filas, un archivo bien ordenado es mejor diseño que 9 carpetas. Particionaríamos solo cuando cada mes tenga millones de filas, o si el Gold viviera en almacenamiento de objetos.
-
-**5. Hay costos que ningún índice resuelve.** La consulta 7 del M3 (`quantile_cont` sobre `tiempo_hasta_pago_seg`) y Q3 cuestan por la agregación, no por el acceso: deben recorrer todos los valores. En producción eso se resuelve con **vistas materializadas o tablas de pre-agregación** (por ejemplo, ventas por evento × zona × día), recalculadas en cada carga del pipeline. El hallazgo de I-2 refuerza esa idea: las tablas materializadas no solo evitan decodificar Parquet, también le dan al planner mejores estadísticas (la estimación del join de Q1 pasó de 20,6x a 1,4x de error).
-
-**6. Escala.** El README del M3 ya decía que la diferencia se vuelve decisiva a millones de filas, y este taller lo confirma con números: el overhead fijo (unos 2,4 ms) es la mitad del tiempo de cada consulta, y solo deja de dominar cuando el volumen de datos lo supera. El siguiente experimento natural es subir `N_USUARIOS` en `scripts/config.py` (hoy 150.000) para encontrar el volumen en el que I-3 e I-6 se vuelven decisivas.
+**3. Tipar y agregar con propósito.** Comparar `TIMESTAMP` nativo con texto más `CAST` redujo la mediana de la consulta 4,00x, con resultados idénticos. En consultas que requieren recorrer todo el conjunto, como el embudo, un índice no evita el costo de agregación; para producción convendrían pre-agregaciones. Todas las conclusiones deben reevaluarse con el volumen, patrón de consultas y fuente de datos reales.
 
 <h1>6. Anexos</h1>
 
@@ -249,8 +258,10 @@ Sobre vistas de Parquet `ANALYZE` no tiene estadísticas propias que actualizar,
 | `Q3_antes.txt` | Q3 sobre vistas de Parquet (diagnóstico) |
 | `Q3_antes_analyze.txt` / `Q3_despues.txt` | Q3 sobre tablas materializadas, antes y después de `ANALYZE` (I-2) |
 | `*_perfil.txt` | Tiempo de CPU y filas reales y estimadas por operador (profiling JSON de DuckDB) |
+| `cockroach_Q1_antes_full_scan.txt` / `cockroach_Q1_despues_index_scan.txt` | CockroachDB: full scan frente al índice compuesto |
+| `Q3_tipos_antes_texto.txt` / `Q3_tipos_despues_timestamp.txt` | DuckDB: predicado `VARCHAR` + `CAST` frente a `TIMESTAMP` |
 
-**B. Documentos de trabajo.** `docs/taller4/diagnostico_baseline.md` (entregable del diagnóstico), `intervenciones.md` (fichas completas), `benchmarks.md` y `analisis_complementario.md` (tablas generadas por los scripts).
+**B. Documentos de trabajo.** `docs/taller4/diagnostico_baseline.md` (diagnóstico), `intervenciones.md` (fichas), `benchmarks.md` (DuckDB), `benchmarks_cockroach.md` (índice e inserciones), `intervencion_tipos.md` (tipos) y `analisis_complementario.md` (controles).
 
 **C. Cómo reproducir.**
 
@@ -259,6 +270,8 @@ python -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
 python -m scripts.taller4_optimizacion     # genera el Gold del M3 si falta; planes, perfiles y benchmarks
 python -m scripts.taller4_complementario   # controles de paralelismo, Hive y ANALYZE
+python -m scripts.taller4_tipos            # VARCHAR + CAST frente a TIMESTAMP
+python -m scripts.oltp.benchmark_cockroach # índice y costo de INSERT en CockroachDB
 ```
 
-Los tiempos absolutos varían según la máquina y la corrida. Lo determinista (row groups, archivos, bytes leídos, operadores y estimaciones) es reproducible con la semilla 42 del M3.
+Los tiempos absolutos varían según la máquina y la corrida. Los planes DuckDB y las filas experimentales CockroachDB son reproducibles; el benchmark CockroachDB modifica sus tablas de laboratorio y debe ejecutarse solo en la base desechable del proyecto.

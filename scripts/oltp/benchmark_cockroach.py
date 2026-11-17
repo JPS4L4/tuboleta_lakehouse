@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_values
-from sqlalchemy import create_engine, text
 
 ROOT=Path(__file__).resolve().parents[2]
 GOLD=ROOT/"lakehouse"/"gold"/"fact_ventas_boletas.parquet"
@@ -50,19 +49,23 @@ def load_fact(base):
                 conn.commit()
     return (time.perf_counter()-started)*1000
 
-def capture_plan(engine,sql,filename):
-    with engine.connect() as conn: rows=conn.execute(text("EXPLAIN ANALYZE "+sql)).fetchall()
+def capture_plan(sql,filename):
+    with psycopg2.connect(DB_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute("EXPLAIN ANALYZE "+sql)
+            rows=cur.fetchall()
     plan="\n".join(" | ".join(str(v) for v in row) for row in rows)
     PLANS.mkdir(parents=True,exist_ok=True); (PLANS/filename).write_text(plan+"\n",encoding="utf-8")
     return plan
 
-def median_query(engine,sql):
+def median_query(sql):
     values=[]
-    with engine.connect() as conn:
-        conn.execute(text(sql)).fetchall()
-        for _ in range(7):
-            started=time.perf_counter(); conn.execute(text(sql)).fetchall()
-            values.append((time.perf_counter()-started)*1000)
+    with psycopg2.connect(DB_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql); cur.fetchall()
+            for _ in range(7):
+                started=time.perf_counter(); cur.execute(sql); cur.fetchall()
+                values.append((time.perf_counter()-started)*1000)
     return statistics.median(values)
 
 def write_batches(n):
@@ -109,16 +112,17 @@ def main():
                 compra_id STRING PRIMARY KEY, tiempo_sk INT8 NOT NULL, evento_sk INT4 NOT NULL,
                 zona_sk INT4 NOT NULL, silla_sk INT4 NOT NULL, usuario_sk INT4 NOT NULL,
                 canal_sk INT4 NOT NULL, precio_pagado DECIMAL(14,2) NOT NULL, cantidad INT4 NOT NULL DEFAULT 1)""")
-    load_ms=load_fact(base); engine=create_engine(DB_URL,pool_pre_ping=True)
+    load_ms=load_fact(base)
     query="""SELECT evento_sk,COUNT(*) AS boletas,SUM(precio_pagado) AS ingresos
              FROM fact_ventas_boletas WHERE tiempo_sk BETWEEN 2026090100 AND 2026093023 GROUP BY evento_sk"""
-    plan_before=capture_plan(engine,query,"cockroach_Q1_antes_full_scan.txt")
-    before=median_query(engine,query)
-    with engine.begin() as conn:
-        conn.execute(text(f"CREATE INDEX {INDEX} ON fact_ventas_boletas (tiempo_sk,evento_sk) STORING (precio_pagado)"))
+    plan_before=capture_plan(query,"cockroach_Q1_antes_full_scan.txt")
+    before=median_query(query)
+    with psycopg2.connect(DB_URL) as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"CREATE INDEX {INDEX} ON fact_ventas_boletas (tiempo_sk,evento_sk) STORING (precio_pagado)")
     indexed=query.replace("FROM fact_ventas_boletas",f"FROM fact_ventas_boletas@{{FORCE_INDEX={INDEX}}}")
-    plan_after=capture_plan(engine,indexed,"cockroach_Q1_despues_index_scan.txt")
-    after=median_query(engine,indexed)
+    plan_after=capture_plan(indexed,"cockroach_Q1_despues_index_scan.txt")
+    after=median_query(indexed)
     insert_without=statistics.median([measure_insert(False) for _ in range(3)])
     insert_with=statistics.median([measure_insert(True) for _ in range(3)])
     factor=insert_with/insert_without if insert_without else float("nan")

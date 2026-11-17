@@ -123,4 +123,4 @@ Las fichas anteriores documentan los experimentos históricos del primer corte. 
 | Corrección de tipos VARCHAR → TIMESTAMP | DuckDB | Q3: `python -m scripts.taller4_tipos`; resultados en `intervencion_tipos.md` |
 | Índice compuesto (tiempo_sk, evento_sk) | CockroachDB | Q4: `python -m scripts.oltp.benchmark_cockroach`; resultados en `benchmarks_cockroach.md` |
 
-Los nuevos resultados no se incorporan como cifras anticipadas: ejecutar los scripts para generar tiempos y planes reales. La matriz completa, el método y los criterios de aceptación están en `experimentos_requeridos.md`.
+Los resultados medidos de las cuatro técnicas están en `benchmarks.md`, `benchmarks_cockroach.md` e `intervencion_tipos.md`; los planes completos están en `planes/`. Las mediciones CockroachDB provienen de filas experimentales sintéticas y no representan transacciones reales. La matriz, el método y los criterios de aceptación están en `experimentos_requeridos.md`.
