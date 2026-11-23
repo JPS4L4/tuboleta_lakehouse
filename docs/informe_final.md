@@ -26,49 +26,256 @@ Roberto Carlos Rahamut Suteu
 Repositorio: github.com/JPS4L4/tuboleta_lakehouse
 :::
 
-# 1. Dominio y proceso analizado {.salto}
+# 1. Contexto del dominio, cargas de trabajo y requisitos {.salto}
 
-TuBoleta vende boletería masiva para el Estadio Atanasio Girardot (Medellín). Su sistema operacional combina dos almacenes con funciones distintas:
+## 1.1. Contexto y problema de negocio
 
-- **Redis (AP):** fila virtual, locks temporales de silla con TTL de 600 s y contadores. Es estado **efímero**.
-- **CockroachDB (CP):** fuente de verdad. Guarda las compras confirmadas y evita el *double-booking* con `UNIQUE(evento, silla)` bajo `SERIALIZABLE`.
+El proyecto modela la comercialización de boletería para eventos en el Estadio Atanasio Girardot, Medellín. La solución atiende dos necesidades con perfiles de acceso diferentes:
 
-El flujo de una compra es: entrar a la fila, ser admitido, bloquear una silla (lock con TTL) y pagar a tiempo (`INSERT` en CockroachDB) o dejar vencer el TTL (abandono; la silla se libera). Si otro usuario ya compró la silla, el `UNIQUE` rechaza el `INSERT`.
+1. **Operación transaccional (OLTP):** registrar compras confirmadas y resultados de intentos de compra, evitando que una misma silla se venda dos veces para un mismo evento.
+2. **Análisis histórico (OLAP):** consultar ventas, ingresos, ocupación, comportamiento por canal y conversión del proceso de compra por evento, zona y período.
 
-Se analizan dos procesos:
+La arquitectura separa el plano operacional del analítico. CockroachDB representa la fuente transaccional de verdad; Redis aparece en el diseño como componente de estado efímero para fila virtual y bloqueos temporales; Parquet almacena las extracciones en Bronze, Silver y Gold; DuckDB ejecuta consultas analíticas sobre los archivos Parquet.
 
-1. **Ventas:** cuántas boletas y cuánto dinero se vendió por evento, zona, canal y período. Una fila es una silla vendida y pagada.
-2. **Embudo de compra:** cómo terminan los intentos (compra, abandono o rechazo `UNIQUE`). Una fila es un intento.
+**Alcance real del prototipo.** El repositorio implementa el generador sintético, el laboratorio local de CockroachDB, la carga de un snapshot sintético, la extracción desde CockroachDB, las transformaciones Parquet y el análisis con DuckDB. Redis no se despliega ni ejecuta: la fila y los locks se representan mediante reglas y resultados generados sintéticamente. Por tanto, el proyecto demuestra el flujo de datos y las restricciones transaccionales en CockroachDB, pero no mide concurrencia de Redis ni el comportamiento de una plataforma de venta en producción.
 
-Los datos son **sintéticos y deterministas** (semilla 42), con cinco eventos, cuatro zonas, tres canales, 45.000 sillas y 150.000 usuarios. Las tasas de conversión, abandono y descuento son parámetros del generador, no datos reales.
+## 1.2. Dominio, actores y proceso de compra
 
-# 2. Arquitectura del Lakehouse
+| Actor o componente | Responsabilidad |
+|---|---|
+| Comprador | Selecciona un evento y una silla, inicia un intento y completa o no el pago. |
+| Servicio de fila virtual | En el diseño, regula la admisión de compradores en períodos de alta demanda. No está implementado como servicio. |
+| Gestor de bloqueo de sillas | En el diseño, reserva temporalmente una silla mediante un lock con TTL. Se representa conceptualmente con Redis; no se ejecuta en el laboratorio. |
+| Servicio transaccional | Persiste la compra confirmada y aplica la regla de unicidad evento–silla en CockroachDB. |
+| Proceso de extracción | Lee las siete tablas operacionales o genera datos sintéticos y escribe los archivos Bronze. |
+| Proceso analítico | Limpia, tipa, modela y consulta los datos con Python, Parquet y DuckDB. |
+| Analista / responsable del evento | Consulta ventas, ingresos, ocupación, canales y resultados del embudo. |
 
-```
- OLTP (CockroachDB + Redis)         datos sintéticos (por defecto)
-            |                                  |
-            +----------------+-----------------+
-                             v
-          BRONZE  lakehouse/bronze   Parquet crudo y sucio, versionado
-                             |  transform_silver.py (limpieza técnica)
-                             v
-          SILVER  lakehouse/silver   Parquet limpio y tipado
-                             |  transform_gold.py (estrella + SCD2)
-                             v
-          GOLD    lakehouse/gold     2 hechos + 6 dimensiones
-                             |  DuckDB (read_parquet)
-                             v
-          analyze.py / consultar.py  consultas + benchmark -> docs/
-```
+El flujo conceptual es: el comprador ingresa a la fila virtual, es admitido, solicita el bloqueo temporal de una silla y paga dentro del tiempo permitido. La configuración define un TTL de **600 segundos**. Si vence el TTL sin pago, el intento puede terminar como **ABANDONO** y la silla liberarse. Si otro comprador ya registró la misma silla para el evento, la restricción única de CockroachDB rechaza la segunda compra; el intento se clasifica como **RECHAZO_UNIQUE**.
 
-| Capa | Contenido | Responsabilidad |
+La regla de integridad central es que una silla no puede venderse dos veces para un evento. En OLTP se materializa mediante la restricción única sobre **(evento_id, silla_id)** en **compras_confirmadas**. En Gold se replica con unicidad sobre **(evento_sk, silla_sk)** en **fact_ventas_boletas** y se valida durante la transformación.
+
+Se analizan dos procesos con granularidades diferentes:
+
+- **Ventas:** una fila representa una silla vendida y pagada en un evento.
+- **Embudo de compra:** una fila representa un intento asociado a una silla, con resultado COMPRA, ABANDONO o RECHAZO_UNIQUE.
+
+Un abandono no se contabiliza como venta. Esta separación evita inflar los ingresos al mezclar hechos de distinta naturaleza.
+
+## 1.3. Datos y volumen de referencia
+
+Los datos son sintéticos y reproducibles mediante una semilla fija (**SEED = 42**). El generador modela cinco eventos, cuatro zonas, tres canales, 45.000 sillas y 150.000 usuarios. Los precios de VIP y Occidental cambian el 1 de julio de 2026 para permitir el análisis histórico mediante SCD Tipo 2.
+
+En una ejecución funcional documentada, Gold contiene:
+
+| Elemento | Volumen |
+|---|---:|
+| Eventos | 5 |
+| Zonas de negocio | 4 |
+| Versiones de zona | 6 |
+| Canales de origen | 3 |
+| Sillas | 45.000 |
+| Usuarios | 150.000 |
+| Ventas confirmadas | 208.236 |
+| Intentos de compra | 260.294 |
+| Registros de dimensión tiempo | 5.656 |
+
+Estos valores describen el conjunto de prueba del repositorio. No son ventas históricas reales, capacidad productiva ni tasas observadas de conversión de TuBoleta. Las tasas de abandono, rechazo, descuento y pago tardío son parámetros del generador.
+
+## 1.4. Cargas de trabajo
+
+| Carga | Tipo | Escala demostrada | Patrón de acceso | Consistencia requerida |
+|---|---|---|---|---|
+| Confirmar compra | OLTP, escritura puntual | Una compra por silla/evento; snapshot funcional de 208.236 ventas | Inserción por clave de compra y validación de unicidad | Alta: no aceptar dos ventas para la misma silla/evento |
+| Consultar compra o intento | OLTP, lectura puntual | Tablas de compras e intentos | Búsqueda por identificadores de compra, intento, evento o silla | Lectura coherente con el estado transaccional |
+| Registrar resultado del intento | OLTP, escritura | 260.294 intentos en el snapshot | Inserción de un resultado por intento | Distinguir compra, abandono y rechazo |
+| Extraer datos | Batch / ETL | Siete tablas operacionales | Lectura por tabla mediante SELECT; ejecución por lote | Snapshot del momento de extracción; no hay CDC |
+| Limpiar y tipar | Batch / ETL | Todo el conjunto extraído | Procesamiento de archivos Parquet | Reglas deterministas de deduplicación, tipado e imputación |
+| Construir el modelo analítico | Batch / OLAP | Dos hechos y seis dimensiones | Reconstrucción completa de Gold | Integridad de claves y correspondencia temporal SCD2 |
+| Consultas de negocio | OLAP, lectura intensiva | 208.236 ventas y 260.294 intentos | Agregaciones por evento, zona, canal y período | Consistencia del snapshot; no es lectura transaccional en tiempo real |
+
+Las consultas de negocio que justifican el modelo son: ventas e ingresos por evento/zona/mes; conversión de intentos; ventas por canal; ocupación por evento y zona; y variación de ingresos según la versión del precio de una zona.
+
+## 1.5. Requisitos funcionales
+
+1. Registrar compras confirmadas e intentos con identificadores de negocio.
+2. Impedir la doble venta de una silla dentro de un mismo evento.
+3. Diferenciar compras pagadas, abandonos y rechazos por unicidad.
+4. Conservar fecha y hora de compra e intento para el análisis temporal.
+5. Identificar evento, silla, usuario, zona y canal asociados a cada registro.
+6. Mantener el histórico de cambios de precio de las zonas mediante versiones con vigencia.
+7. Extraer las tablas operacionales a Bronze sin ocultar valores nulos que deben tratarse en Silver.
+8. Producir un modelo Gold que permita responder consultas de ventas y del embudo de compra.
+
+## 1.6. Requisitos no funcionales
+
+El repositorio no define acuerdos de nivel de servicio (SLA/SLO) de producción ni mide la disponibilidad de una plataforma distribuida. Se separan los atributos derivados del diseño de las metas que todavía tendrían que acordarse con el negocio.
+
+| Atributo | Requisito de diseño | Evidencia o límite actual |
 |---|---|---|
-| Bronze | Parquet tal como llega, con suciedad intencional | Conservar el dato crudo, un archivo por extracción |
-| Silver | Parquet limpio y tipado | Solo limpieza técnica: deduplicar, `strip`, convertir fechas, resolver nulos, descartar filas sin clave |
-| Gold | Estrella: 2 hechos y 6 dimensiones | Modelar para análisis y resolver claves sustitutas |
-| DuckDB | Vistas `read_parquet` sobre Gold | Consultas analíticas sin cargar datos a un motor |
+| Integridad transaccional | No permitir más de una compra por evento–silla | Restricción UNIQUE en CockroachDB y validación equivalente en Gold |
+| Consistencia | Priorizar la corrección de la compra sobre la disponibilidad de una réplica aislada | CockroachDB es fuente de verdad; laboratorio de un nodo |
+| Disponibilidad | La fila virtual puede degradarse sin comprometer la regla final de venta | Redis no está desplegado; no hay medición |
+| Rendimiento OLTP | Operaciones puntuales y acceso eficiente por claves | Existe experimento de índice; no hay SLO productivo |
+| Rendimiento OLAP | Consultas eficientes sobre columnas y agregaciones | DuckDB consulta Parquet Gold; hay benchmarks locales |
+| Escalabilidad | Separar carga transaccional de escaneos analíticos | Separación arquitectónica; entorno local y dataset sintético |
+| Calidad de datos | Deduplicar, normalizar IDs, tipar fechas, tratar nulos y descartar filas sin clave | Silver y reporte de calidad |
+| Reproducibilidad | Regenerar datos y repetir el pipeline | Semilla fija 42 y comando python main.py |
+| Retención y trazabilidad | Identificar archivos por tabla, extracción y fuente | Bronze agrega _extraido_en y _fuente; no hay política formal de retención |
+| Seguridad | No usar configuración insegura en producción | --insecure y root se limitan al laboratorio; falta endurecimiento productivo |
 
-`main.py` orquesta extracción, Silver, Gold y análisis en un solo comando y tarda unos 8 segundos. Los Parquet no se versionan: se regeneran en cada ejecución.
+Quedan pendientes de definición con el negocio: latencia máxima de compra, disponibilidad mensual, RPO/RTO, retención histórica, volumen máximo esperado, concurrencia pico, presupuesto y objetivo de frescura del lakehouse. No se asignan cifras sin requisitos o pruebas que las respalden.
+
+## 1.7. Decisión CAP por subsistema
+
+CAP se utiliza como criterio de diseño para servicios distribuidos bajo una partición de red. La clasificación describe la intención arquitectónica, no una prueba de tolerancia a fallos ejecutada en el laboratorio.
+
+| Subsistema | Prioridad de diseño | Justificación y estado |
+|---|---|---|
+| Redis (fila y locks efímeros) | AP, según el diseño documentado | Se busca mantener disponible la admisión y el estado temporal cuando sea posible. El estado no es autoridad final de venta. Redis no está desplegado ni probado; AP es una decisión conceptual. |
+| CockroachDB (compras confirmadas) | CP, según el diseño documentado | Se priorizan consistencia y unicidad; una partición sin quórum puede reducir disponibilidad antes que aceptar ventas conflictivas. El laboratorio de un nodo no valida particiones de clúster. |
+| Parquet / Bronze-Silver-Gold | No se asigna categoría CAP en este prototipo | Son snapshots derivados por lotes; no coordinan escrituras transaccionales distribuidas. |
+| DuckDB | No se usa como coordinador transaccional distribuido | Ejecuta lecturas analíticas locales sobre Parquet y no reemplaza la fuente de verdad. |
+
+La confirmación final depende de CockroachDB y de la restricción única evento–silla. Así, un estado temporal de fila o bloqueo no se convierte en autoridad de compra. La clasificación CP expresa la decisión de diseño y las garantías transaccionales buscadas, no una prueba CAP del despliegue local.
+
+# 2. Arquitectura de persistencia políglota e integración
+
+## 2.1. Vista general
+
+La arquitectura asigna cada tecnología a un tipo de dato y patrón de acceso. CockroachDB atiende las operaciones transaccionales; Redis se contempla para estado temporal; Parquet conserva los datos históricos en capas; DuckDB ejecuta las consultas analíticas. Python y pandas coordinan generación, extracción y transformaciones.
+
+~~~text
+              PROCESO DE VENTA (diseño operacional)
+ Comprador
+    |
+    v
+ Fila virtual / admisión
+    |
+    v
+ Redis (previsto, no ejecutado)
+ - estado de fila
+ - lock de silla, TTL = 600 s
+ - contadores efímeros
+    |
+    v
+ Servicio de compra
+    |
+    v
+ CockroachDB (implementado en laboratorio)
+ - compras_confirmadas
+ - intentos_compra
+ - UNIQUE(evento_id, silla_id)
+    |
+    | extracción batch (SELECT *)
+    v
+ BRONZE / Parquet
+ - snapshot por tabla
+ - _extraido_en / _fuente
+    |
+    | transform_silver.py
+    v
+ SILVER / Parquet
+ - normalización y deduplicación
+ - conversión de tipos y tratamiento de nulos
+    |
+    | transform_gold.py
+    v
+ GOLD / Parquet
+ - 2 tablas de hechos
+ - 6 dimensiones conformadas
+ - SCD Tipo 2 en dim_zona
+    |
+    | DuckDB / read_parquet
+    v
+ Consultas de negocio y benchmark
+ - scripts/analyze.py
+ - scripts/consultar.py
+~~~
+
+Redis pertenece al flujo conceptual de admisión y bloqueo, pero no es dependencia del pipeline ejecutable. El pipeline puede correr en modo sintético sin CockroachDB; alternativamente, puede extraer el snapshot cargado en CockroachDB con USE_SYNTHETIC=false.
+
+## 2.2. Persistencia políglota: responsabilidades
+
+| Tecnología | Modelo y datos | Patrón de acceso | Justificación | Estado en el proyecto |
+|---|---|---|---|---|
+| CockroachDB | Relacional SQL; catálogos y transacciones de compra | Inserciones, lecturas puntuales y restricciones | Fuente transaccional y regla evento–silla expresada en la base | Nodo local Docker, snapshot sintético cargable y extracción verificada |
+| Redis | Clave–valor efímero; fila, locks y contadores | Lecturas/escrituras rápidas con expiración | Estado temporal de admisión y reserva, separado del histórico de ventas | Diseñado/documentado; no desplegado |
+| Parquet | Archivos columnares tipados | Lectura analítica por columnas, row groups y particiones | Almacenamiento histórico desacoplado del motor transaccional | Implementado en Bronze, Silver y Gold |
+| DuckDB | Motor SQL analítico embebido | Escaneos columnares, filtros, joins y agregaciones | Ejecutar OLAP sobre archivos sin operar otro servidor | Implementado y usado en consultas/benchmarks |
+| Python / pandas | Procesamiento tabular | ETL por lotes | Generación, extracción y transformaciones | Implementado |
+
+Un motor relacional transaccional es apropiado para confirmar una compra porque la operación necesita restricciones e integridad sobre registros individuales. Las consultas analíticas, en cambio, recorren muchas ventas para agrupar por tiempo, evento, zona o canal. La separación OLTP/OLAP evita que los escaneos históricos compitan directamente con la ruta transaccional. DuckDB consulta Parquet sin convertir el almacén de archivos en una base transaccional.
+
+## 2.3. Esquema operacional de CockroachDB
+
+El DDL se encuentra en **oltp/init/01_schema.sql**. El cargador **scripts/oltp/load_cockroach.py** crea la base tuboleta, ejecuta el esquema y carga las siete tablas operacionales.
+
+| Tabla | Clave primaria | Función |
+|---|---|---|
+| canales | canal_id | Catálogo de canales |
+| zonas | (zona_id, valido_desde) | Tarifario e historial de versiones de zona |
+| eventos | evento_id | Catálogo de eventos |
+| sillas | silla_id | Inventario lógico de sillas y zona asociada |
+| usuarios | usuario_id | Atributos de usuario |
+| compras_confirmadas | compra_id | Compra pagada |
+| intentos_compra | intento_id | Resultado persistido de cada intento |
+
+La tabla **compras_confirmadas** contiene una clave primaria sobre compra_id y una restricción **UNIQUE(evento_id, silla_id)**, denominada **uq_compra_evento_silla**. También conserva fecha_compra como TIMESTAMP y permite canal_id nulo para que la calidad del dato se trate en Silver.
+
+La unicidad evento–silla es la protección transaccional central contra el *double-booking*. Una segunda inserción con la misma combinación no puede convertirse en otra compra confirmada. El esquema no declara claves foráneas entre todas las tablas de catálogo y transacción; las relaciones por identificadores se utilizan durante la extracción y construcción del modelo analítico, por lo que no se atribuyen al DDL restricciones FK que no aparecen allí.
+
+El esquema incluye además tablas experimentales para el benchmark OLTP. No forman parte de las siete tablas operacionales que extrae **scripts/extract.py**; el benchmark de índice se documenta por separado.
+
+Ejemplo ilustrativo de consulta de una silla vendida:
+
+~~~sql
+SELECT compra_id, fecha_compra
+FROM compras_confirmadas
+WHERE evento_id = 'E-002'
+  AND silla_id = 'S-00001';
+~~~
+
+La consulta permite verificar el estado persistido, pero la garantía definitiva es la restricción UNIQUE: una consulta previa por sí sola no evita carreras entre solicitudes concurrentes.
+
+## 2.4. Redis y estado efímero
+
+En el diseño, Redis cumple una función distinta de CockroachDB: mantiene el estado temporal de la fila virtual, los locks de silla con TTL de **600 segundos** y contadores operativos. Si vence el lock sin pago, el intento puede terminar como ABANDONO. Redis no se considera la fuente definitiva de una compra confirmada.
+
+La configuración define **TTL_LOCK_SEG = 600** y un umbral de pago tardío en el 80 % del TTL. El generador produce resultados de intentos y la marca de pago tardío a partir de datos sintéticos; no consulta una instancia Redis.
+
+**Límite de implementación:** no existe servicio Redis en docker-compose.yml, no hay cliente Redis en las dependencias del pipeline y no se ejecutan operaciones SET NX EX. Por ello, el proyecto no demuestra adquisición concurrente de locks, liberación por expiración, recuperación ni rendimiento de Redis. Es una pieza de arquitectura propuesta y simulada por el generador.
+
+## 2.5. Almacenamiento Lakehouse e integración
+
+| Capa | Formato y contenido | Transformación | Propósito |
+|---|---|---|---|
+| Bronze | Parquet crudo por tabla y extracción | Agrega _extraido_en y _fuente; conserva la estructura recibida | Trazabilidad y conservación del dato de origen |
+| Silver | Parquet limpio y tipado | Deduplicación, normalización de IDs, conversión de fechas, imputación de canal_id nulo y descarte de filas sin clave | Calidad técnica y tipos consistentes |
+| Gold | Parquet dimensional | Dimensiones, claves sustitutas, dos hechos y resolución temporal SCD2 | Consultas analíticas y métricas de negocio |
+| DuckDB | Vistas/consultas read_parquet sobre Gold | Filtros, joins y agregaciones SQL | Acceso analítico sin cargar el snapshot en un servidor |
+
+La integración implementada es **batch**:
+
+1. El cargador opcional prepara un snapshot sintético en CockroachDB.
+2. **extract.py** lee las siete tablas con SELECT * o llama al generador sintético.
+3. Bronze conserva un archivo Parquet por tabla y extracción.
+4. Silver procesa la extracción más reciente.
+5. Gold reconstruye el modelo dimensional.
+6. DuckDB consulta Gold para producir resultados y benchmarks.
+
+El modo predeterminado usa USE_SYNTHETIC=true y no requiere CockroachDB. Con USE_SYNTHETIC=false, la extracción lee el snapshot cargado en CockroachDB. El cargador OLTP conserva canal_id nulo; la imputación a DESCONOCIDO ocurre en Silver, no durante la carga de la base.
+
+No existe integración streaming ni CDC implementada, ni un programador de cargas recurrentes. La frescura del lakehouse depende de cuándo se ejecuta manualmente el pipeline; los datos analíticos no están sincronizados en tiempo real. CDC o una estrategia incremental con marca de agua quedan como evolución futura, no como parte del prototipo.
+
+## 2.6. Decisiones y límites de la arquitectura
+
+- **CockroachDB** es la fuente de verdad para las compras confirmadas y aplica la unicidad evento–silla.
+- **Redis** se propone para estado efímero; su disponibilidad no reemplaza la garantía transaccional de CockroachDB.
+- **Bronze, Silver y Gold** son snapshots derivados por lotes y pueden estar temporalmente desactualizados respecto de OLTP.
+- **DuckDB** consulta el último Gold generado y no coordina escrituras de compra.
+- El nodo CockroachDB de docker-compose.yml utiliza **start-single-node --insecure**. Esta configuración reproduce el laboratorio, pero no valida particiones, quórum ni tolerancia a fallos de un clúster distribuido.
+- La arquitectura separa patrones transaccionales y analíticos; no implica que CockroachDB no pueda ejecutar consultas analíticas, sino que DuckDB/Parquet se seleccionó para demostrar el patrón OLAP del proyecto.
 
 # 3. Diseño dimensional {.salto}
 
