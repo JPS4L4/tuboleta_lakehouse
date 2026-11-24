@@ -12,7 +12,7 @@ Análisis de la venta de boletería con arquitectura Bronze / Silver / Gold, Par
 
 **Informe final**
 
-Curso: Tópicos Avanzados en Bases de Datos — Taller 3
+Curso: Tópicos Avanzados en Bases de Datos — Entrega final
 
 **Integrantes**\
 Luis Manuel Contreras\
@@ -21,10 +21,22 @@ Juan Pablo Salazar
 **Docente**\
 Roberto Carlos Rahamut Suteu
 
-20 de octubre de 2026
+Noviembre de 2026
 
 Repositorio: github.com/JPS4L4/tuboleta_lakehouse
 :::
+
+# Resumen ejecutivo {.salto}
+
+El proyecto desarrolla un mini-lakehouse para analizar la comercialización de boletería de eventos en el Estadio Atanasio Girardot. La arquitectura separa la operación transaccional de la analítica: CockroachDB conserva el snapshot OLTP y aplica la unicidad evento–silla; Parquet organiza las capas Bronze, Silver y Gold; DuckDB consulta el modelo dimensional. Redis se documenta como componente propuesto para fila y bloqueos temporales, pero no se despliega en el prototipo.
+
+El conjunto funcional es sintético y reproducible: 208.236 ventas confirmadas, 260.294 intentos, 45.000 sillas, 150.000 usuarios, cinco eventos y seis versiones de zona. El pipeline batch transforma siete tablas operacionales, conserva trazabilidad en Bronze, corrige calidad y tipos en Silver y construye dos hechos y seis dimensiones en Gold, con SCD Tipo 2 para el historial de precios de zona.
+
+Las consultas de negocio cubren ingresos, ocupación, canales, conversión y cambios de precio. En la corrida analítica más reciente, DuckDB sobre Gold obtuvo una mediana de 16,97 ms frente a 444,01 ms de SQLite para la agregación evento–zona–mes; es una comparación OLAP y no una medición directa de CockroachDB.
+
+M4 evaluó cuatro técnicas: el ordenamiento redujo los bytes leídos 4,5 veces y mejoró el tiempo 1,05x; el particionado Hive redujo los bytes 9,9 veces, pero empeoró el tiempo 9 % por overhead; la conversión VARCHAR→TIMESTAMP mejoró 3,98x; y el índice compuesto de CockroachDB mejoró 2,08x la lectura, con un costo de inserción cercano al 10,5 %. Los resultados muestran que el plan y el volumen leído deben analizarse junto con el tiempo y el costo de escritura.
+
+El prototipo demuestra integración batch, calidad, modelado dimensional y experimentación reproducible en un entorno local. No representa ventas reales, despliegue productivo, CDC, streaming, Redis ejecutado ni tolerancia a fallos multi-nodo.
 
 # 1. Contexto del dominio, cargas de trabajo y requisitos {.salto}
 
@@ -341,7 +353,7 @@ Hay eventos cuya ventana de ventas cruza el 1 de julio, así que un mismo evento
 
 **Silver** deduplica por clave de negocio, aplica `strip`, convierte fechas, reemplaza el canal nulo por `DESCONOCIDO` y descarta las filas sin clave. **Gold** construye las dimensiones, resuelve claves sustitutas y la versión de zona, y ejecuta las verificaciones de integridad.
 
-**Reporte de calidad de la última ejecución** (`docs/reporte_calidad_silver.txt`):
+**Reporte de calidad de la última ejecución** (`docs/reporte_calidad_silver.txt`, 16-11-2026 23:19). Esta evidencia corresponde a la extracción desde CockroachDB (`USE_SYNTHETIC=false`), no a la ruta sintética directa:
 
 | Tabla | Filas Bronze | Filas Silver | % retenido | Duplicados | Sin clave | Nulos resueltos |
 |---|---:|---:|---:|---:|---:|---:|
@@ -349,15 +361,15 @@ Hay eventos cuya ventana de ventas cruza el 1 de julio, así que un mismo evento
 | zonas | 6 | 6 | 100,00 | 0 | 0 | 0 |
 | eventos | 5 | 5 | 100,00 | 0 | 0 | 0 |
 | sillas | 45.000 | 45.000 | 100,00 | 0 | 0 | 0 |
-| usuarios | 150.750 | 150.000 | 99,50 | 750 | 0 | 0 |
-| compras_confirmadas | 210.358 | 208.236 | 98,99 | 2.082 | 40 | 3.101 |
-| intentos_compra | 262.936 | 260.294 | 99,00 | 2.602 | 40 | 3.906 |
+| usuarios | 150.000 | 150.000 | 100,00 | 0 | 0 | 0 |
+| compras_confirmadas | 208.236 | 208.236 | 100,00 | 0 | 0 | 3.101 |
+| intentos_compra | 260.294 | 260.294 | 100,00 | 0 | 0 | 3.906 |
 
-En `compras_confirmadas` la suma de `precio_pagado` baja de 22.352.656.600 COP en Bronze a 22.126.123.800 COP en Silver: la diferencia son los duplicados y las filas sin clave, que inflaban los ingresos.
+Los valores nulos de `canal_id` se conservaron desde CockroachDB hasta Bronze y fueron imputados como `DESCONOCIDO` en Silver. No se perdieron ventas ni ingresos en esta ejecución: `precio_pagado` suma 22.126.123.800 COP tanto en Bronze como en Silver.
 
-**Alcance de esta tabla.** Estos conteos corresponden a la ejecución del generador sintético conectada directamente a Bronze, donde se conservan duplicados y filas sin clave para probar Silver. No deben atribuirse a la extracción desde CockroachDB: el cargador OLTP elimina previamente las filas que violarían claves primarias o la restricción única por evento/silla, pero conserva los nulos de `canal_id`. En ese segundo recorrido, Bronze debe mostrar esos nulos y Silver debe imputarlos a `DESCONOCIDO`; el contador exacto se obtiene del archivo `docs/reporte_calidad_silver.txt` generado en la ejecución entregable.
+**Prueba de limpieza con anomalías sintéticas.** En la ruta directa del generador (`USE_SYNTHETIC=true`), Bronze contiene 150.750 usuarios, 210.358 compras y 262.936 intentos. Silver retiene 150.000, 208.236 y 260.294, respectivamente; elimina 750, 2.082 y 2.602 duplicados, descarta 40 compras y 40 intentos sin clave, e imputa 3.101 y 3.906 nulos de canal. En compras, el total pasa de 22.352.656.600 COP a 22.126.123.800 COP. Estos conteos pertenecen a una ejecución distinta y no se mezclan con la tabla anterior. El detalle de ambas rutas está en `docs/taller4/ejecuciones_pipeline.md`.
 
-**Separación de responsabilidades.** El cargador de CockroachDB no invoca `limpiar_tabla()`: únicamente normaliza identificadores y aplica las restricciones estructurales indispensables para insertar. La imputación de calidad ocurre en Silver, donde se registra el número de valores nulos resueltos. `DESCONOCIDO` es un miembro válido de `dim_canal` para preservar integridad referencial, no una categoría de canal inferida.
+**Separación de responsabilidades.** El cargador de CockroachDB no ejecuta la limpieza de Silver: aplica las restricciones estructurales de OLTP y conserva `canal_id` nulo. Silver realiza la imputación a `DESCONOCIDO`, que es un miembro técnico válido de `dim_canal`, no una categoría inferida.
 
 **Volúmenes de Gold.**
 
@@ -405,17 +417,43 @@ Se ejecutan nueve consultas de negocio sobre Gold con DuckDB (`scripts/analyze.p
 
 **Abandono.** Los abandonos asocian 3.868 millones de COP de precio de lista, una cota superior del ingreso potencial perdido (parte de esas sillas se vendió después a otro usuario). Por zona: Occidental 1.494, Norte 994, General 757 y VIP 623 millones de COP.
 
-# 6. Benchmark OLTP vs columnar {.salto}
+# 6. Optimización de rendimiento (M4) {.salto}
 
-Misma agregación lógica en tres motores: boletas e ingresos por **evento x zona x mes** (60 grupos, 208.236 ventas). No se mide la carga; se hace un calentamiento y se toma la mediana de 5 corridas. Los tres motores devuelven exactamente las mismas cifras (verificado con una aserción). Máquina: Windows 11, 12 hilos lógicos, Python 3.12.10, DuckDB 1.5.6, SQLite 3.49.1.
+La fase M4 separa el diagnóstico y la optimización analítica en DuckDB/Parquet de la optimización transaccional en CockroachDB. El Gold original del M3 se conserva; las intervenciones analíticas se ejecutan sobre artefactos independientes. Se utiliza warm-up y mediana según cada experimento, y se comprueba que los resultados lógicos antes/después sean iguales.
+
+### Diagnóstico de consultas
+
+Se analizaron tres consultas: Q1, ingresos por evento en septiembre; Q2, ingresos por zona en septiembre; Q3, embudo de conversión por evento. Q1 leía 208.236 filas para devolver dos grupos, con un único row group y 640,9 kB leídos: full scan sin data skipping. Q2 leía 583,7 kB de un archivo único para retener el 16,3 % de filas: full scan con filtro empujado, pero sin pruning por archivo. Q3 agregaba los 260.294 intentos sin filtro selectivo, por lo que leer toda la fact era necesario; se utilizó como control y no se diagnosticó un problema de acceso.
+
+### Intervenciones analíticas y OLTP
+
+| Técnica | Antes | Después | Resultado |
+|---|---:|---:|---|
+| Ordenamiento por `tiempo_sk` / Q1 | 5,09 ms | 4,83 ms | 1,05x; 1/1 → 3/11 row groups; bytes 640,9 → 142,4 kB |
+| Particionado Hive `year/month` / Q2 | 2,31 ms | 2,55 ms | 0,91x; 1 de 9 archivos; bytes 583,7 → 58,8 kB |
+| Corrección VARCHAR + CAST → TIMESTAMP | 19,887 ms | 4,996 ms | 3,98x; mismo resultado: 34.039 ventas y COP 3.689.715.500 |
+| Índice compuesto CockroachDB `(tiempo_sk, evento_sk)` | 687,713 ms | 331,261 ms | 2,08x en lectura; 1.000.000 → 163.137 filas decodificadas |
+| Costo de índice en INSERT (20.000 filas) | 460,19 ms | 508,56 ms | 10,5 % más lento con índice |
+
+**Interpretación.** El ordenamiento sí habilitó data skipping, aunque el overhead fijo y la caché limitaron la mejora de tiempo a cerca del 5 %. Hive redujo casi diez veces los bytes leídos, pero el glob, la enumeración de carpetas y la pérdida de estadísticas hicieron que el tiempo empeorara aproximadamente 9 % con este volumen pequeño. La lectura directa del archivo mensual midió 1,08 ms, frente a 2,52 ms del glob Hive en el control complementario. La conversión a TIMESTAMP evitó un CAST por fila y presentó la mejora temporal más clara. El índice CockroachDB redujo el costo de lectura selectiva, a cambio de mantenimiento adicional en escrituras.
+
+El plan CockroachDB sin índice registró full scan de un millón de filas, 73 MiB y ocho llamadas gRPC; con índice, 163.137 filas, 9,7 MiB y una llamada. Los tiempos de EXPLAIN ANALYZE (983 ms y 404 ms) son capturas instrumentadas individuales, distintas de las medianas de siete corridas (687,713 y 331,261 ms).
+
+Los experimentos se ejecutaron sobre datos sintéticos y en un CockroachDB de un solo nodo local. El benchmark de índice no representa ventas reales ni mide un clúster distribuido. Los archivos de evidencia, SQL completos, planes antes/después, entorno y comandos están en [`docs/taller4/`](taller4/) y en el documento [M4 — Diagnóstico y optimización](entrega_final/M4_optimizacion_rendimiento.md).
+
+**Estadística de dispersión.** Los artefactos disponibles conservan medianas y algunos rangos de corridas, pero no una desviación estándar cruda y homogénea para las cuatro técnicas. Por rigor, no se inventa ese valor; debe calcularse cuando se exporten las observaciones individuales de todas las repeticiones.
+
+# 7. Benchmark OLTP vs columnar {.salto}
+
+Misma agregación lógica en tres motores: boletas e ingresos por **evento x zona x mes** (60 grupos, 208.236 ventas). No se mide la carga; se hace un calentamiento y se toma la mediana de 5 corridas. Los tres motores devuelven exactamente las mismas cifras (verificado con una aserción). Máquina: Windows 11, 16 hilos lógicos, Python 3.13.14, DuckDB 2.0.0, SQLite 3.50.4. Ejecución: 16-11-2026 23:20.
 
 | Motor | Fuente | Medición actual (ms) | Mejora vs (a) |
 |---|---|---:|---:|
-| (a) SQLite, almacén por filas (OLTP-like) | Silver normalizado + índices típicos | 427,23 | 1,0x |
-| (b) DuckDB sobre Bronze crudo | Parquet sucio, limpieza en la consulta | 162,61 | 2,6x |
-| (c) DuckDB sobre Gold (estrella) | Parquet columnar modelado | 14,23 | 30,0x |
+| (a) SQLite, almacén por filas (OLTP-like) | Silver normalizado + índices típicos | 444,01 | 1,0x |
+| (b) DuckDB sobre Bronze crudo | Parquet sucio, limpieza en la consulta | 169,22 | 2,6x |
+| (c) DuckDB sobre Gold (estrella) | Parquet columnar modelado | 16,97 | 26,2x |
 
-**Análisis.** En la ejecución más reciente, DuckDB sobre Gold fue 30 veces más rápido que SQLite para esta agregación; Bronze crudo fue 2,6 veces más rápido. Gold fue aproximadamente 11,4 veces más rápido que Bronze, coherente con el beneficio adicional de evitar limpieza al vuelo y consultar claves enteras y dimensiones pequeñas. Estos valores corresponden al benchmark del pipeline analítico ejecutado por `main.py`, no al experimento de índice de CockroachDB. Se reporta la medición de esta ejecución y no se mezclan rangos de corridas anteriores.
+**Análisis.** En la ejecución más reciente, DuckDB sobre Gold fue 26,2 veces más rápido que SQLite para esta agregación; Bronze crudo fue 2,6 veces más rápido. Gold fue aproximadamente 9,97 veces más rápido que Bronze, coherente con el beneficio adicional de evitar limpieza al vuelo y consultar claves enteras y dimensiones pequeñas. Estos valores corresponden al benchmark del pipeline analítico ejecutado por `main.py`, no al experimento de índice de CockroachDB. Se reporta la medición de esta ejecución y no se mezclan rangos de corridas anteriores.
 
 **Salvedades honestas.**
 
@@ -425,7 +463,7 @@ Misma agregación lógica en tres motores: boletas e ingresos por **evento x zon
 - Los tiempos varían unos milisegundos entre ejecuciones.
 - El almacén por filas del benchmark es SQLite, no una instancia real de CockroachDB.
 
-# 7. Limitaciones y evolución futura
+# 8. Limitaciones y evolución futura
 
 - **Datos sintéticos.** Los patrones son plausibles pero no reales; las tasas son parámetros del generador.
 - **Carga completa.** Cada ejecución reconstruye Silver y Gold. A mayor volumen habría que pasar a cargas incrementales (por rango de fechas o marca de agua).
@@ -436,7 +474,7 @@ Misma agregación lógica en tres motores: boletas e ingresos por **evento x zon
 - **Embudo parcial.** Empieza en el lock de la silla; las salidas de la fila antes de lograr un lock no se persisten y no se analizan.
 - **Una compra es una silla.** No se modela el carrito de varias sillas en una transacción.
 
-# 8. Cómo reproducir
+# 9. Cómo reproducir
 
 Requisitos: Python 3.10 o superior (probado con 3.12). No se necesita CockroachDB.
 
@@ -466,4 +504,4 @@ python -m scripts.consultar "SELECT COUNT(*) AS boletas FROM fact_ventas_boletas
 | `docs/modelo_dimensional.dbml` y `.png` | Modelo en estrella |
 | `docs/reporte_calidad_silver.txt` | Bronze vs Silver |
 | `docs/resultados_consultas.md` | Salida de las nueve consultas |
-| `docs/benchmark.md` | Tabla y condiciones del benchmark |
+| `docs/benchmark.md` | Tabla y condiciones del benchmark |\n| `docs/entrega_final/M4_optimizacion_rendimiento.md` | Diagnóstico, cuatro técnicas M4, planes y resultados |
