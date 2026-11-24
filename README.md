@@ -222,6 +222,12 @@ Salidas completas en [`docs/resultados_consultas.md`](docs/resultados_consultas.
 
 Evolución futura (CDC con Kafka, cargas incrementales, SCD2 en usuarios): ver [`docs/diseno_dimensional.md`](docs/diseno_dimensional.md).
 
+## 13. Entrega final del proyecto
+
+- [Informe final integrado](docs/informe_final.md): contexto, arquitectura, lakehouse, consultas, benchmark, optimización M4 y reproducibilidad.
+- [Documento M4 — diagnóstico y optimización](docs/entrega_final/M4_optimizacion_rendimiento.md): SQL de diagnóstico, cuatro intervenciones, resultados, planes y limitaciones.
+- [Matriz de evidencia M4](docs/taller4/estado_evidencia.md): ubicación de planes, benchmarks y comandos para repetir las mediciones.
+
 ## 12. Taller 4: optimización de consultas
 
 Parte del Gold del Taller 3 (sin modificarlo) y aplica el ciclo diagnóstico → intervención → medición sobre tres consultas, con DuckDB 2.0.0 sobre Parquet. Las intervenciones escriben en `lakehouse/gold_t4/`.
