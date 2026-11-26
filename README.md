@@ -229,3 +229,11 @@ Evolución futura (CDC con Kafka, cargas incrementales, SCD2 en usuarios): ver [
 - [Consultas SQL completas y resultados de referencia](docs/entrega_final/consultas_sql_resultados.md)
 - [Estadística M4 reproducible: comandos y CSV](docs/entrega_final/estadistica_m4_reproducible.md)
 - [Matriz de evidencia y reproducibilidad](docs/taller4/estado_evidencia.md)
+
+
+## Entrega final (plantilla ITM)
+
+- [Complemento documental: implementación, metodología, lecciones y trazabilidad](docs/entrega_final/complemento_documental.md)
+- [Matriz de cumplimiento y pendientes locales](docs/entrega_final/matriz_cumplimiento.md)
+- [Diagrama general de arquitectura](docs/entrega_final/arquitectura_general.svg)
+- [Informe principal](docs/informe_final.md)
