@@ -237,3 +237,70 @@ Evolución futura (CDC con Kafka, cargas incrementales, SCD2 en usuarios): ver [
 - [Matriz de cumplimiento y pendientes locales](docs/entrega_final/matriz_cumplimiento.md)
 - [Diagrama general de arquitectura](docs/entrega_final/arquitectura_general.svg)
 - [Informe principal](docs/informe_final.md)
+
+## 12. Taller 4 — optimización: estado de entrega y pendientes
+
+Esta sección funciona como checklist de auditoría. Distingue entre lo que ya está implementado/documentado en el repositorio y lo que todavía requiere una ejecución local antes de afirmar que la entrega está completamente reproducida.
+
+### 12.1. Requisitos del taller y evidencia disponible
+
+| Requisito | Qué debe demostrarse | Estado en el repositorio | Evidencia principal |
+|---|---|---|---|
+| Ordenamiento + data skipping | Ordenar por `tiempo_sk`, dividir en row groups y demostrar descarte de grupos | **Implementado y documentado; falta repetir la medición local final** | `scripts/taller4_optimizacion.py`; `docs/taller4/planes/Q1_antes.txt`, `Q1_despues.txt`; `docs/taller4/benchmarks.md` |
+| Particionado Hive | Particionar por año/mes y demostrar partition pruning | **Implementado y documentado; falta repetir la medición local final** | `scripts/taller4_optimizacion.py`; planes Q2 antes/después; `docs/taller4/benchmarks.md` |
+| Corrección de tipos | Comparar fecha como VARCHAR + CAST frente a TIMESTAMP nativo, conservando el resultado | **Implementado y medido históricamente; falta regenerar CSV estadísticos** | `scripts/taller4_tipos.py`; `docs/taller4/intervencion_tipos.md`; planes `Q3_tipos_antes_texto.txt` y `Q3_tipos_despues_timestamp.txt` |
+| Índice compuesto CockroachDB | Comparar full scan e index scan en una tabla experimental de 1 millón de filas y medir el costo de INSERT | **Implementado y medido históricamente; falta regenerar CSV estadísticos** | `scripts/oltp/benchmark_cockroach.py`; `docs/taller4/benchmarks_cockroach.md`; planes CockroachDB antes/después |
+
+### 12.2. Resultados históricos documentados
+
+Estos valores son resultados de ejecuciones anteriores registradas en la documentación. No son una promesa de que otra máquina obtendrá los mismos tiempos.
+
+| Experimento | Antes | Después | Lectura correcta |
+|---|---:|---:|---|
+| Ordenamiento / Q1 | 5,09 ms | 4,83 ms | 4,5 veces menos bytes leídos; mejora temporal pequeña (~5 %) |
+| Hive / Q2 | 2,31 ms | 2,55 ms | 9,9 veces menos bytes; tiempo ~9 % peor por overhead de archivos/particiones |
+| VARCHAR → TIMESTAMP | 19,887 ms | 4,996 ms | 3,98x más rápido; mismos 34.039 registros y 3.689.715.500 COP |
+| Índice CockroachDB / lectura | 687,713 ms | 331,261 ms | 2,08x; filas decodificadas bajan de 1.000.000 a 163.137 |
+| Índice CockroachDB / INSERT 20.000 | 460,19 ms | 508,56 ms | El índice añade aproximadamente 10,5 % de costo de escritura |
+
+**No interpretar Hive como una mejora de tiempo:** su evidencia favorable es la reducción de lectura física; en este volumen el tiempo total empeoró. Tampoco confundir el benchmark SQLite/DuckDB del pipeline con el experimento de índice CockroachDB: son pruebas distintas.
+
+### 12.3. Qué está listo en el repositorio
+
+- [x] Documentación del diagnóstico de Q1, Q2 y Q3.
+- [x] Scripts de optimización de ordenamiento, Hive y controles complementarios.
+- [x] Script de comparación VARCHAR frente a TIMESTAMP.
+- [x] Script del índice compuesto y benchmark de inserciones CockroachDB.
+- [x] Planes de ejecución antes/después para Q1 y Q2.
+- [x] Planes de ejecución de Q3 y de la comparación de tipos.
+- [x] Planes CockroachDB de full scan e index scan.
+- [x] Resultados históricos y explicación de los costos/beneficios.
+- [x] Informe técnico de Taller 4 en Markdown y PDF.
+- [x] Guía para regenerar las mediciones y estadísticas: [estadística M4 reproducible](entrega_final/estadistica_m4_reproducible.md).
+
+### 12.4. Qué falta hacer en el equipo local antes de cerrar la entrega
+
+- [ ] Ejecutar el pipeline desde la raíz del repositorio: `python main.py`.
+- [ ] Levantar CockroachDB y comprobar el laboratorio OLTP: `docker compose up -d`, luego `python -m scripts.oltp.load_cockroach`.
+- [ ] Ejecutar `python -m scripts.oltp.benchmark_cockroach`.
+- [ ] Ejecutar `python -m scripts.taller4_optimizacion`.
+- [ ] Ejecutar `python -m scripts.taller4_tipos`.
+- [ ] Ejecutar `python -m scripts.taller4_complementario`.
+- [ ] Confirmar que se generaron y revisar los seis CSV: `mediciones_crudas_duckdb.csv`, `estadisticas_duckdb.csv`, `mediciones_crudas_tipos.csv`, `estadisticas_tipos.csv`, `mediciones_crudas_cockroach.csv`, `estadisticas_cockroach.csv` dentro de `docs/taller4/`.
+- [ ] Comparar los CSV reales con las medianas históricas; si difieren, documentar la nueva corrida y no reemplazar cifras sin explicar el cambio.
+- [ ] Revisar que el PDF final que se entregue corresponda a la última versión de los documentos y contenga las cifras definitivas.
+- [ ] Verificar el contenido del ZIP final y que incluya los archivos que se van a entregar.
+
+Los CSV anteriores **no se consideran presentes ni generados hasta comprobarlos después de ejecutar los comandos**. Las medianas históricas y los planes versionados sí están documentados en el repositorio.
+
+### 12.5. Limitaciones que deben declararse en la sustentación
+
+- Los datos son sintéticos; no son transacciones reales de TuBoleta.
+- CockroachDB se probó en un nodo local Docker, no en un clúster distribuido.
+- La tabla de un millón de filas pertenece al benchmark experimental del índice y está separada de las tablas funcionales del lakehouse.
+- Redis se describe como componente conceptual; no está desplegado.
+- El pipeline es batch; no implementa CDC ni streaming.
+- Las mediciones dependen del equipo, versión, caché y carga del sistema. No son garantías de rendimiento en producción.
+
+**Criterio de cierre:** el Taller 4 está implementado y documentado en el repositorio, pero la entrega no debe marcarse como completamente reproducida hasta ejecutar los experimentos en el equipo final, conservar los CSV crudos/estadísticos y revisar el PDF/ZIP que se enviarán.
+
