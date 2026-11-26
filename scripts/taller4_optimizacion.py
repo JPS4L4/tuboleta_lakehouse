@@ -13,6 +13,7 @@ Qué hace (una intervención por problema):
 """
 from __future__ import annotations
 
+import csv
 import json
 import platform
 import re
@@ -31,6 +32,7 @@ T4 = RAIZ / "lakehouse" / "gold_t4"
 OUT = RAIZ / "docs" / "taller4"
 PLANES = OUT / "planes"
 TABLAS = ["fact_ventas_boletas", "fact_intentos_compra", "dim_tiempo", "dim_evento", "dim_zona", "dim_canal"]
+OBSERVACIONES: list[tuple[str, int, float]] = []
 
 # ---------------------------------------------------------------- consultas
 Q1 = ("Q1 - Ingresos por evento en septiembre 2026", """
@@ -71,7 +73,9 @@ def conectar(ruta_fact_ventas: str | None = None, materializar: bool = False) ->
     return con
 
 
-def mediana_ms(con, sql: str, calentamiento: int = 3, corridas: int = 5) -> float:
+def mediana_ms(con, sql: str, calentamiento: int = 3, corridas: int = 5,
+               etiqueta: str = "medicion") -> float:
+    """Mide y conserva cada repetición; los calentamientos quedan excluidos."""
     for _ in range(calentamiento):
         con.execute(sql).fetchall()
     tiempos = []
@@ -79,7 +83,27 @@ def mediana_ms(con, sql: str, calentamiento: int = 3, corridas: int = 5) -> floa
         t0 = time.perf_counter()
         con.execute(sql).fetchall()
         tiempos.append((time.perf_counter() - t0) * 1000)
+    OBSERVACIONES.extend((etiqueta, i, valor) for i, valor in enumerate(tiempos, 1))
     return statistics.median(tiempos)
+
+
+def guardar_estadisticas() -> None:
+    """Exporta observaciones crudas y estadísticos muestrales por medición."""
+    OUT.mkdir(parents=True, exist_ok=True)
+    with (OUT / "mediciones_crudas_duckdb.csv").open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["medicion", "repeticion", "tiempo_ms"])
+        w.writerows(OBSERVACIONES)
+    grupos: dict[str, list[float]] = {}
+    for nombre, _, valor in OBSERVACIONES:
+        grupos.setdefault(nombre, []).append(valor)
+    with (OUT / "estadisticas_duckdb.csv").open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["medicion", "n", "mediana_ms", "min_ms", "max_ms", "desviacion_estandar_muestral_ms"])
+        for nombre, valores in grupos.items():
+            w.writerow([nombre, len(valores), f"{statistics.median(valores):.4f}",
+                        f"{min(valores):.4f}", f"{max(valores):.4f}",
+                        f"{statistics.stdev(valores):.4f}" if len(valores) > 1 else ""])
 
 
 def anonimizar(texto: str) -> str:
@@ -162,7 +186,7 @@ def main() -> None:
     for titulo, sql in (Q1, Q2_BASE, Q3):
         clave = titulo.split(" - ")[0]
         guardar_plan(con0, sql, f"{clave}_antes")
-        base[clave] = mediana_ms(con0, sql)
+        base[clave] = mediana_ms(con0, sql, etiqueta=f"{clave}_antes")
         print(f"[baseline] {titulo}: {base[clave]:.2f} ms")
     rg_antes = row_groups(str(GOLD / "fact_ventas_boletas.parquet"))
     print(f"[baseline] row groups de fact_ventas_boletas: {rg_antes}")
@@ -173,7 +197,7 @@ def main() -> None:
     df.sort_values("tiempo_sk").to_parquet(ordenado, index=False, row_group_size=20_000)
     con1 = conectar(str(ordenado))
     guardar_plan(con1, Q1[1], "Q1_despues")
-    t1 = mediana_ms(con1, Q1[1])
+    t1 = mediana_ms(con1, Q1[1], etiqueta="Q1_despues_ordenamiento")
     assert sorted(con0.execute(Q1[1]).fetchall()) == sorted(con1.execute(Q1[1]).fetchall()), "Q1: resultados distintos"
     filas.append(("Q1", "Sin data skipping: 1 row group, se lee toda la fact", "I-3 ordenar por tiempo_sk (rg=20K)",
                   base["Q1"], t1, f"row groups: {rg_antes} -> {row_groups(str(ordenado))}"))
@@ -189,7 +213,7 @@ def main() -> None:
     con2 = duckdb.connect()
     sql_part = Q2_PART.format(ruta=base_part.as_posix())
     guardar_plan(con2, sql_part, "Q2_despues")
-    t2 = mediana_ms(con2, sql_part)
+    t2 = mediana_ms(con2, sql_part, etiqueta="Q2_despues_hive")
     r_a = sorted(con0.execute(Q2_BASE[1]).fetchall())
     r_d = sorted(con2.execute(sql_part).fetchall())
     assert [(a, b, int(c)) for a, b, c in r_a] == [(a, b, int(c)) for a, b, c in r_d], "resultados distintos"
@@ -201,11 +225,11 @@ def main() -> None:
     # Same materialized connection before and after, so ANALYZE is the only variable.
     con3 = conectar(materializar=True)          # tablas reales: aquí ANALYZE sí tiene objeto
     plan_a = guardar_plan(con3, Q3[1], "Q3_antes_analyze")
-    t3_antes = mediana_ms(con3, Q3[1])
+    t3_antes = mediana_ms(con3, Q3[1], etiqueta="Q3_antes_analyze")
     r3_antes = sorted(con3.execute(Q3[1]).fetchall())
     con3.execute("ANALYZE")
     plan_d = guardar_plan(con3, Q3[1], "Q3_despues")
-    t3 = mediana_ms(con3, Q3[1])
+    t3 = mediana_ms(con3, Q3[1], etiqueta="Q3_despues_analyze")
     assert r3_antes == sorted(con3.execute(Q3[1]).fetchall()), "Q3: resultados distintos"
     ops = operadores(plan_d)
     cambio = "No — plan idéntico: " + " + ".join(dict.fromkeys(ops)) if ops == operadores(plan_a) else "Sí — cambió el árbol de operadores"
@@ -224,6 +248,8 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "benchmarks.md").write_text("\n".join(md), encoding="utf-8")
     print("\n" + "\n".join(md))
+    guardar_estadisticas()
+    print(f"\nEstadísticas crudas: {OUT / 'mediciones_crudas_duckdb.csv'}")
     print(f"\nPlanes en {PLANES}")
 
 
