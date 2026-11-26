@@ -109,7 +109,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-`main.py` corre extracción, Silver, Gold y análisis; imprime el tiempo de cada paso y termina con código 1 si alguno falla. La corrida final del 26-11-2026 tardó 6,92 s en este entorno (las corridas anteriores, alrededor de 10 s). Los Parquet no se versionan: se regeneran en cada ejecución. Cada paso también se puede correr solo, por ejemplo `python -m scripts.transform_silver`.
+`main.py` corre extracción, Silver, Gold y análisis; imprime el tiempo de cada paso y termina con código 1 si alguno falla. La corrida final del 26-11-2026 tardó 6,92 s en este entorno (las corridas anteriores, alrededor de 10 s). Los Parquet no se versionan: se regeneran en cada ejecución. Cada paso también se puede correr solo, por ejemplo `python -m scripts.transform_silver`. Los PDF del informe final y de la guía se regeneran con `python -m scripts.entrega_pdf`.
 
 Variables de entorno (opcionales):
 
@@ -155,7 +155,8 @@ tuboleta_lakehouse/
 │   ├── benchmark.py              # OLTP vs columnar
 │   ├── taller4_optimizacion.py   # Taller 4: ordenamiento y particionado Hive
 │   ├── taller4_complementario.py # Taller 4: controles (paralelismo, Hive, ANALYZE), mediana de 15
-│   └── taller4_pdf.py            # Taller 4: renderiza el informe a PDF (requiere Edge o Chrome)
+│   ├── taller4_pdf.py            # Taller 4: renderiza el informe a PDF (requiere Edge o Chrome)
+│   └── entrega_pdf.py            # informe final y guía: renderiza ambos a PDF (python -m scripts.entrega_pdf)
 ├── docker-compose.yml             # Nodo local CockroachDB
 ├── oltp/                           # Esquema y guía del motor transaccional
 └── docs/
@@ -167,7 +168,7 @@ tuboleta_lakehouse/
     ├── benchmark.md
     ├── informe_final.md          # informe final (fuente versionada)
     ├── informe_final.pdf         # informe final renderizado
-    ├── guia_proyecto.pdf         # guía: qué es, cómo instalarlo, estado y propuesta de diapositivas
+    ├── guia_proyecto.md / .pdf   # guía (fuente y PDF): qué es, cómo instalarlo, estado y propuesta de diapositivas
     ├── entregables_tuboleta_lakehouse.zip  # paquete de entregables (Talleres 3 y 4)
     └── taller4/
         ├── diagnostico_baseline.md   # diagnóstico de Q1, Q2 y Q3
@@ -233,7 +234,7 @@ Evolución futura (CDC con Kafka, cargas incrementales, SCD2 en usuarios): ver [
 
 ## Entrega final (plantilla ITM)
 
-- [Complemento documental: implementación, metodología, lecciones y trazabilidad](docs/entrega_final/complemento_documental.md)
+- [Complemento documental (contenido ya integrado en el informe final)](docs/entrega_final/complemento_documental.md)
 - [Matriz de cumplimiento y pendientes locales](docs/entrega_final/matriz_cumplimiento.md)
 - [Diagrama general de arquitectura](docs/entrega_final/arquitectura_general.svg)
 - [Informe principal](docs/informe_final.md)

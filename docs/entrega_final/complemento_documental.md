@@ -1,5 +1,7 @@
 # Complemento documental de la entrega final
 
+> Nota: el contenido de este complemento quedó integrado en `docs/informe_final.md` (secciones 2.7, 5.1, 6, 7, 8, 9, 10, 11 y Anexos). Se conserva como referencia.
+
 > Documento complementario del informe principal. Consolida los apartados de la plantilla que requerían mayor explicitud. Las afirmaciones distinguen entre funcionalidades implementadas, propuestas conceptuales y pruebas pendientes. No reemplaza las evidencias técnicas originales.
 
 ## 1. Implementación y estructura del repositorio

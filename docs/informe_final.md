@@ -278,7 +278,7 @@ La integración implementada es **batch**:
 
 El modo predeterminado usa USE_SYNTHETIC=true y no requiere CockroachDB. Con USE_SYNTHETIC=false, la extracción lee el snapshot cargado en CockroachDB. El cargador OLTP conserva canal_id nulo; la imputación a DESCONOCIDO ocurre en Silver, no durante la carga de la base.
 
-No existe integración streaming ni CDC implementada, ni un programador de cargas recurrentes. La frescura del lakehouse depende de cuándo se ejecuta manualmente el pipeline; los datos analíticos no están sincronizados en tiempo real. CDC o una estrategia incremental con marca de agua quedan como evolución futura, no como parte del prototipo.
+No existe integración streaming ni CDC implementada, ni un programador de cargas recurrentes. La frescura del lakehouse depende de cuándo se ejecuta manualmente el pipeline; los datos analíticos no están sincronizados en tiempo real. La latencia de actualización equivale a la duración de una corrida (6,92 s en la corrida final del 26-11-2026), sin marca de agua persistente. CDC o una estrategia incremental con marca de agua quedan como evolución futura, no como parte del prototipo.
 
 ## 2.6. Decisiones y límites de la arquitectura
 
@@ -288,6 +288,16 @@ No existe integración streaming ni CDC implementada, ni un programador de carga
 - **DuckDB** consulta el último Gold generado y no coordina escrituras de compra.
 - El nodo CockroachDB de docker-compose.yml utiliza **start-single-node --insecure**. Esta configuración reproduce el laboratorio, pero no valida particiones, quórum ni tolerancia a fallos de un clúster distribuido.
 - La arquitectura separa patrones transaccionales y analíticos; no implica que CockroachDB no pueda ejecutar consultas analíticas, sino que DuckDB/Parquet se seleccionó para demostrar el patrón OLAP del proyecto.
+
+## 2.7. Justificación y alternativas tecnológicas
+
+**CockroachDB** se eligió para la fuente operacional por su modelo relacional, sus transacciones y sus restricciones de integridad; la restricción única evento–silla protege la regla de no vender dos veces el mismo asiento. PostgreSQL sería una alternativa relacional válida; no se hizo una prueba comparativa directa entre ambos, por lo que no se afirma superioridad de rendimiento.
+
+**DuckDB** se eligió para OLAP porque consulta Parquet directamente y evita administrar un servidor analítico adicional en el entorno académico local. Spark sería una alternativa ante necesidades de procesamiento distribuido que no forman parte del alcance medido.
+
+**Parquet** se prefirió sobre CSV como almacenamiento analítico porque es columnar, conserva tipos y habilita lectura selectiva y *pruning* por grupos y particiones. CSV sigue siendo útil para intercambio, pero no se seleccionó como formato principal del lakehouse.
+
+No se debe describir Redis como una base desplegada ni Parquet como un motor de base de datos: Parquet es el formato de almacenamiento y DuckDB el motor analítico.
 
 # 3. Diseño dimensional {.salto}
 
@@ -417,11 +427,177 @@ Se ejecutan nueve consultas de negocio sobre Gold con DuckDB (`scripts/analyze.p
 
 **Abandono.** Los abandonos asocian 3.868 millones de COP de precio de lista, una cota superior del ingreso potencial perdido (parte de esas sillas se vendió después a otro usuario). Por zona: Occidental 1.494, Norte 994, General 757 y VIP 623 millones de COP.
 
+Además de las nueve consultas ejecutadas por `scripts/analyze.py`, el documento `docs/entrega_final/consultas_sql_resultados.md` reúne cinco consultas SQL completas, con su propósito y resultados de referencia (ingresos por canal, ocupación, embudo de conversión, evolución de precios SCD2 y análisis por evento y período). Los resultados corresponden a la ejecución de referencia indicada en ese archivo; al reproducir la entrega en otro equipo deben regenerarse Gold y las consultas para confirmar que coinciden.
+
+## 5.1. Consultas SQL de negocio sobre Gold
+
+Estas son las cinco consultas completas de `docs/entrega_final/consultas_sql_resultados.md`, ejecutables con DuckDB sobre los Parquet de Gold. Sus resultados de referencia son los de las tablas anteriores y los de `docs/resultados_consultas.md` (corrida final del 26-11-2026).
+
+### Consulta 1. Ingresos y boletas por evento y mes
+
+**Pregunta:** ¿Cómo se distribuyen las ventas de cada evento durante su ventana de venta?
+
+```sql
+SELECT
+    e.nombre_evento,
+    t.anio,
+    t.mes,
+    t.mes_nombre,
+    COUNT(*) AS boletas,
+    CAST(SUM(f.precio_pagado) AS BIGINT) AS ingresos
+FROM fact_ventas_boletas f
+JOIN dim_tiempo t ON t.tiempo_sk = f.tiempo_sk
+JOIN dim_evento e ON e.evento_sk = f.evento_sk
+GROUP BY
+    e.fecha_evento, e.nombre_evento,
+    t.anio, t.mes, t.mes_nombre
+ORDER BY e.fecha_evento, t.anio, t.mes;
+```
+
+**Qué demuestra:** permite seguir el volumen y los ingresos en el tiempo sin consultar tablas operacionales normalizadas.
+
+### Consulta 2. Ocupación e ingresos por evento y zona
+
+**Pregunta:** ¿Qué porcentaje de la capacidad de cada zona se vendió y cuánto dinero generó?
+
+```sql
+SELECT
+    e.nombre_evento,
+    z.nombre_zona,
+    MAX(z.capacidad_zona) AS capacidad_zona,
+    COUNT(*) AS vendidas,
+    ROUND(100.0 * COUNT(*) / MAX(z.capacidad_zona), 2) AS ocupacion_pct,
+    CAST(SUM(f.precio_pagado) AS BIGINT) AS ingresos
+FROM fact_ventas_boletas f
+JOIN dim_zona z ON z.zona_sk = f.zona_sk
+JOIN dim_evento e ON e.evento_sk = f.evento_sk
+GROUP BY
+    e.fecha_evento, e.nombre_evento,
+    z.zona_id, z.nombre_zona
+ORDER BY e.fecha_evento, ingresos DESC;
+```
+
+**Qué demuestra:** combina una métrica operativa (ocupación) con ingresos y capacidad de la dimensión.
+
+### Consulta 3. Volumen, ingresos y ticket promedio por canal
+
+**Pregunta:** ¿Qué canal vende más y cuál es el ticket promedio?
+
+```sql
+SELECT
+    c.nombre AS canal,
+    COUNT(*) AS boletas,
+    ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 2) AS boletas_pct,
+    CAST(SUM(f.precio_pagado) AS BIGINT) AS ingresos,
+    CAST(ROUND(AVG(f.precio_pagado), 0) AS BIGINT) AS ticket_promedio,
+    CAST(ROUND(AVG(f.descuento_aplicado), 0) AS BIGINT) AS descuento_promedio
+FROM fact_ventas_boletas f
+JOIN dim_canal c ON c.canal_sk = f.canal_sk
+GROUP BY c.nombre
+ORDER BY ingresos DESC;
+```
+
+**Qué demuestra:** compara canales y mantiene visibles los registros cuyo canal no pudo identificarse en origen.
+
+### Consulta 4. Embudo de conversión por evento
+
+**Pregunta:** ¿Cuántos intentos terminan en compra, abandono o rechazo por unicidad?
+
+```sql
+WITH intentos AS (
+    SELECT
+        d.nombre_evento AS evento,
+        COUNT(*) AS intentos,
+        CAST(SUM(i.es_compra) AS BIGINT) AS compras,
+        CAST(SUM(i.es_abandono) AS BIGINT) AS abandonos,
+        CAST(SUM(i.es_rechazo_unique) AS BIGINT) AS rechazos_unique
+    FROM fact_intentos_compra i
+    JOIN dim_evento d ON d.evento_sk = i.evento_sk
+    GROUP BY d.nombre_evento
+),
+ventas AS (
+    SELECT
+        d.nombre_evento AS evento,
+        CAST(SUM(f.es_pago_tardio) AS BIGINT) AS pagos_tardios
+    FROM fact_ventas_boletas f
+    JOIN dim_evento d ON d.evento_sk = f.evento_sk
+    GROUP BY d.nombre_evento
+)
+SELECT
+    i.evento,
+    i.intentos,
+    i.compras,
+    i.abandonos,
+    i.rechazos_unique,
+    ROUND(100.0 * i.compras / i.intentos, 2) AS conversion_pct,
+    ROUND(100.0 * i.abandonos / i.intentos, 2) AS abandono_pct,
+    ROUND(100.0 * i.rechazos_unique / i.intentos, 2) AS rechazo_unique_pct,
+    ROUND(100.0 * v.pagos_tardios / i.compras, 2) AS pago_tardio_pct
+FROM intentos i
+JOIN ventas v USING (evento)
+ORDER BY i.intentos DESC;
+```
+
+**Qué demuestra:** separa intentos de ventas confirmadas y permite observar el efecto de abandono y de la restricción de unicidad.
+
+### Consulta 5. SCD Tipo 2: ingresos VIP por versión de precio
+
+**Pregunta:** ¿Cómo cambian las ventas y los ingresos entre las dos versiones del precio VIP?
+
+```sql
+SELECT
+    z.zona_sk,
+    z.nombre_zona,
+    z.precio_base,
+    z.valido_desde,
+    z.valido_hasta,
+    COUNT(*) AS boletas,
+    CAST(SUM(f.precio_pagado) AS BIGINT) AS ingresos,
+    CAST(ROUND(AVG(f.precio_pagado), 0) AS BIGINT) AS ticket_promedio,
+    CAST(ROUND(AVG(f.descuento_aplicado), 0) AS BIGINT) AS descuento_promedio
+FROM fact_ventas_boletas f
+JOIN dim_zona z ON z.zona_sk = f.zona_sk
+WHERE z.zona_id = 'Z-VIP'
+GROUP BY
+    z.zona_sk, z.nombre_zona, z.precio_base,
+    z.valido_desde, z.valido_hasta
+ORDER BY z.valido_desde;
+```
+
+**Qué demuestra:** conserva el historial de precios y asigna cada venta a la versión vigente en su fecha, en lugar de sobrescribir el valor histórico.
+
+## 5.2. Dashboard (no implementado)
+
+No se implementó un dashboard interactivo con Streamlit, Metabase u otra herramienta. Los resultados se visualizan mediante consultas SQL, salidas de consola y documentación; por eso el apartado de dashboard de la plantilla se declara **no aplicable** al alcance implementado, y no se adjuntan capturas ni se atribuyen KPIs a una interfaz inexistente. Como trabajo futuro se propone un dashboard con ingresos, boletas, ocupación, ticket promedio y conversión por evento, zona, canal y período.
+
 # 6. Optimización de rendimiento (M4) {.salto}
 
 La fase M4 separa el diagnóstico y la optimización analítica en DuckDB/Parquet de la optimización transaccional en CockroachDB. El Gold original del M3 se conserva; las intervenciones analíticas se ejecutan sobre artefactos independientes. Se utiliza warm-up y mediana según cada experimento, y se comprueba que los resultados lógicos antes/después sean iguales.
 
 **Origen de las cifras.** Los tiempos de esta sección provienen de la corrida final del 26-11-2026 en esta máquina (Python 3.14.6, DuckDB 2.0.0, CockroachDB v25.4.0 de un solo nodo en Docker, Windows 11, AMD64), con el pipeline extraído desde CockroachDB (`USE_SYNTHETIC=false`). Las medianas de corridas de desarrollo anteriores fueron distintas (por ejemplo, 2,08x en la lectura con índice y 3,98x en tipos); aquí solo se reportan las de esta corrida.
+
+### Metodología de medición y protocolos
+
+Los protocolos no son idénticos entre experimentos y se mantienen separados; sus resultados no se combinan.
+
+| Experimento | Calentamiento | Repeticiones reportadas | Métrica |
+|---|---|---:|---|
+| Ordenamiento / Hive / control DuckDB | 3 warm-ups | 5 en el laboratorio principal | Mediana |
+| Corrección VARCHAR → TIMESTAMP | Calentamiento previo (no incluido en el CSV) | 9 | Mediana |
+| Lectura CockroachDB con/sin índice | Calentamiento previo (no incluido en el CSV) | 7 lecturas | Mediana |
+| Inserción CockroachDB | No se reporta | 3 lotes de 20.000 filas | Mediana |
+
+Los controles complementarios (mediana de 15 corridas con 3 warm-ups) son otro protocolo y se documentan aparte en `docs/taller4/analisis_complementario.md`. Los planes y perfiles están en `docs/taller4/planes/`. Comandos de medición, desde la raíz del repositorio:
+
+~~~text
+python -m scripts.taller4_optimizacion
+python -m scripts.taller4_tipos
+docker compose up -d
+python -m scripts.oltp.load_cockroach
+python -m scripts.oltp.benchmark_cockroach
+~~~
+
+No todos los comandos generan el mismo número de repeticiones. Los archivos esperados y el protocolo se detallan en la guía de [Estadística M4 reproducible](entrega_final/estadistica_m4_reproducible.md).
 
 ### Diagnóstico de consultas
 
@@ -481,7 +657,8 @@ Misma agregación lógica en tres motores: boletas e ingresos por **evento x zon
 - SQLite corre con índices pensados para buscar filas, no para recorrer 208.000 ventas.
 - Con este volumen todas las consultas responden en menos de medio segundo; la diferencia se vuelve decisiva a millones de filas y no cambia el resultado de negocio. Con menos de 100.000 filas las diferencias se reducen.
 - Los tiempos varían unos milisegundos entre ejecuciones.
-- El almacén por filas del benchmark es SQLite, no una instancia real de CockroachDB.
+- El almacén por filas del benchmark es SQLite, no una instancia real de CockroachDB: la comparación evalúa una consulta analítica equivalente sobre Silver/Parquet y Gold/Parquet, no es CockroachDB contra DuckDB. El experimento de CockroachDB es independiente y mide el efecto de un índice compuesto en una tabla OLTP de laboratorio.
+- El factor de 28,4x debe leerse como «DuckDB sobre Gold fue 28,4 veces más rápido que SQLite en esta consulta, conjunto de datos y entorno»; no se generaliza a toda carga ni se atribuye solo al formato Parquet, porque también intervienen el modelo Gold, el motor y el paralelismo.
 
 # 8. Limitaciones y evolución futura
 
@@ -493,29 +670,109 @@ Misma agregación lógica en tres motores: boletas e ingresos por **evento x zon
 - **Instantánea de inventario.** Una tabla periódica de `sillas_disponibles` por zona y día introduciría una métrica semi-aditiva.
 - **Embudo parcial.** Empieza en el lock de la silla; las salidas de la fila antes de lograr un lock no se persisten y no se analizan.
 - **Una compra es una silla.** No se modela el carrito de varias sillas en una transacción.
+- **Un solo nodo y sin Redis.** CockroachDB corre en un nodo local de Docker: no se evaluaron quórum, *failover*, latencia entre nodos ni recuperación ante particiones. Redis no está desplegado; la fila virtual y los locks TTL son parte del escenario conceptual y del generador, no una integración operacional probada.
+- **Capacidad no medida.** El máximo volumen sostenible no se determinó con una prueba de saturación; no se declara una capacidad máxima sin medir memoria, duración y fallos a escala. Las mediciones son locales y sensibles a la caché, la carga del equipo, el sistema operativo y las versiones.
 
-# 9. Cómo reproducir
+# 9. Implementación, estructura y ejecución reproducible
 
-Requisitos: Python 3.10 o superior (probado con 3.12). No se necesita CockroachDB.
+## 9.1. Estructura del repositorio
 
-```
+~~~text
+tuboleta_lakehouse/
+├── docker-compose.yml
+├── main.py
+├── requirements.txt
+├── oltp/
+│   ├── README.md
+│   └── init/01_schema.sql
+├── lakehouse/
+│   ├── bronze/
+│   ├── silver/
+│   └── gold/
+├── scripts/
+│   ├── extract.py
+│   ├── generate_synthetic.py
+│   ├── transform_silver.py
+│   ├── transform_gold.py
+│   ├── analyze.py
+│   ├── benchmark.py
+│   ├── consultar.py
+│   ├── entrega_pdf.py
+│   ├── oltp/
+│   │   ├── load_cockroach.py
+│   │   └── benchmark_cockroach.py
+│   ├── taller4_optimizacion.py
+│   ├── taller4_tipos.py
+│   ├── taller4_complementario.py
+│   └── taller4_pdf.py
+└── docs/
+    ├── informe_final.md / .pdf
+    ├── guia_proyecto.md / .pdf
+    ├── modelo_dimensional.png
+    ├── reporte_calidad_silver.txt
+    ├── resultados_consultas.md
+    ├── entrega_final/
+    └── taller4/
+        └── planes/
+~~~
+
+Los directorios Bronze, Silver y Gold se versionan con archivos `.gitkeep`; los Parquet de ejecución se generan localmente y no se confunden con los archivos fuente del repositorio.
+
+## 9.2. Scripts principales
+
+| Script | Responsabilidad | Salida / verificación |
+|---|---|---|
+| `main.py` | Orquesta extracción, Silver, Gold, análisis y benchmark | Consola con estado y tiempos por etapa; código de salida distinto de cero ante error |
+| `scripts/extract.py` | Genera datos sintéticos o extrae desde CockroachDB según `USE_SYNTHETIC` | Parquet Bronze por tabla y extracción |
+| `scripts/generate_synthetic.py` | Genera el escenario reproducible y anomalías controladas | Datos de entrada para la ruta sintética |
+| `scripts/transform_silver.py` | Deduplica, normaliza claves, corrige fechas, imputa canal y trata filas sin clave | Parquet Silver y reporte de calidad |
+| `scripts/transform_gold.py` | Construye dimensiones, hechos, claves sustitutas y resolución SCD2 | Parquet Gold; validaciones de integridad |
+| `scripts/analyze.py` | Ejecuta consultas de negocio y benchmark analítico | Resultados de consultas y mediciones |
+| `scripts/consultar.py` | Ejecuta consultas SQL interactivas sobre Gold | Resultado y duración de la consulta |
+| `scripts/oltp/load_cockroach.py` | Inicializa y carga el snapshot reproducible en CockroachDB | Esquema y datos OLTP locales |
+| `scripts/oltp/benchmark_cockroach.py` | Mide lectura con/sin índice e impacto de inserciones | Resultados del laboratorio CockroachDB |
+| `scripts/taller4_optimizacion.py` | Evalúa ordenamiento, data skipping, Hive y control ANALYZE | Planes y mediciones M4 |
+| `scripts/taller4_tipos.py` | Compara fecha textual con TIMESTAMP | Planes y mediciones M4 |
+| `scripts/taller4_complementario.py` | Ejecuta controles complementarios del laboratorio | `docs/taller4/analisis_complementario.md` |
+| `scripts/taller4_pdf.py`, `scripts/entrega_pdf.py` | Renderizan a PDF el informe del Taller 4, el informe final y la guía (requieren Edge o Chrome) | PDF en `docs/` y `docs/taller4/` |
+
+## 9.3. Ejecución reproducible
+
+Requisitos: Python 3.10 o superior (probado con 3.12); los tiempos del Taller 4 se midieron con Python 3.14 y las versiones de `requirements.txt`. La ejecución por defecto usa datos sintéticos y no necesita CockroachDB. Desde la raíz del repositorio:
+
+~~~text
 git clone https://github.com/JPS4L4/tuboleta_lakehouse.git
 cd tuboleta_lakehouse
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 python main.py
-```
+~~~
 
 `main.py` corre extracción, Silver, Gold y análisis, imprime el tiempo de cada paso y termina con código 1 si alguno falla. Cada paso también se puede correr solo, por ejemplo `python -m scripts.transform_silver`.
 
+Para ejecutar el camino de extracción desde CockroachDB (el de la corrida final del 26-11-2026), en PowerShell:
+
+~~~text
+docker compose up -d
+python -m scripts.oltp.load_cockroach
+$env:USE_SYNTHETIC = "false"
+python main.py
+~~~
+
+Para volver a la ruta sintética en esa sesión: `$env:USE_SYNTHETIC = "true"` y `python main.py`. El tiempo depende del equipo, el estado de Docker, la caché y la cantidad de datos generados, por lo que no se fija un tiempo universal; la corrida final tardó 6,92 s en el equipo de entrega.
+
 Consultas en vivo sobre Gold, con el tiempo en milisegundos:
 
-```
+~~~text
 python -m scripts.consultar --lista
 python -m scripts.consultar ocupacion
 python -m scripts.consultar "SELECT COUNT(*) AS boletas FROM fact_ventas_boletas"
-```
+~~~
+
+Los PDF de esta entrega se regeneran con `python -m scripts.entrega_pdf` (informe final y guía) y `python -m scripts.taller4_pdf` (informe del Taller 4).
+
+## 9.4. Archivos de documentación
 
 | Archivo | Contenido |
 |---|---|
@@ -530,12 +787,71 @@ python -m scripts.consultar "SELECT COUNT(*) AS boletas FROM fact_ventas_boletas
 | `docs/entrega_final/M4_optimizacion_rendimiento.md` | Diagnóstico, cuatro técnicas M4, planes y resultados |
 
 
----
+# 10. Lecciones aprendidas y trabajo futuro
 
-## 10. Complemento de cumplimiento de la plantilla final
+## 10.1. Qué cambiaríamos del diseño original
 
-Para evitar duplicar el contenido técnico ya desarrollado en los módulos, los apartados de implementación, metodología detallada, dashboard (no implementado), lecciones aprendidas, evolución futura, trazabilidad M1→M4 y lista de verificación se consolidan en [docs/entrega_final/complemento_documental.md](entrega_final/complemento_documental.md).
+1. **Ordenamiento como propiedad de Gold desde el primer diseño.** Ordenar la fact de ventas por `tiempo_sk` al materializar Gold permitiría que los filtros temporales aprovechen row groups desde la primera versión, en lugar de aplicar el ordenamiento como experimento posterior.
+2. **Tipos temporales correctos en la frontera de Silver.** La fecha debe convertirse a TIMESTAMP durante la estandarización y no esperar hasta la consulta analítica; elimina CAST repetidos y reduce errores semánticos.
+3. **Particionado condicionado por volumen y selectividad.** No activaríamos Hive automáticamente: la prueba mostró menos bytes leídos pero peor tiempo total. Lo habilitaríamos cuando el volumen y la selectividad justifiquen el costo de metadatos, validándolo con benchmark.
+4. **Índices guiados por consultas y costo de escritura.** Mantendríamos el índice compuesto solo si el patrón de lectura lo justifica: la mejora de lectura de 2,02x debe contrastarse con el aumento de 16,2 % en el lote de inserción.
+5. **Separación explícita de datos de prueba y de negocio.** El benchmark de un millón de filas debe permanecer aislado de las tablas funcionales y claramente identificado como carga experimental.
+6. **Automatizar validaciones y estadísticas.** El pipeline debería producir por ejecución conteos, aserciones, planes, muestras crudas y resumen estadístico, con identificador de corrida y configuración registrada.
 
-La matriz requisito–evidencia–estado está en [docs/entrega_final/matriz_cumplimiento.md](entrega_final/matriz_cumplimiento.md). El diagrama general de arquitectura está en [docs/entrega_final/arquitectura_general.svg](entrega_final/arquitectura_general.svg).
+## 10.2. Evolución a 10x y 100x
 
-**Estado de las ejecuciones locales:** los CSV estadísticos de M4, `python main.py` y el PDF consolidado se generaron o regeneraron en la corrida final del 26-11-2026; los mínimos, máximos y desviaciones estándar salen de esos CSV. Queda por verificar el contenido del ZIP final y que el docente tenga acceso al repositorio.
+**Escenario 10x.** Aumentarían la generación de datos y las pruebas de memoria y tiempo; se introducirían cargas incrementales por fecha o marca de agua, compactación de archivos pequeños y particionamiento solo donde los filtros lo justifiquen. Se mantendría DuckDB si el equipo y el tiempo de consulta siguen dentro de los objetivos medidos.
+
+**Escenario 100x.** Se evaluaría almacenamiento de objetos y un formato de tabla como Apache Iceberg o Delta Lake para snapshots, evolución de esquema y mantenimiento de metadatos. Para ingesta de baja latencia se incorporaría CDC/*changefeeds* desde CockroachDB hacia Kafka y un consumidor de streaming (por ejemplo Flink) que escriba micro-lotes. La decisión dependería de SLO, volumen, concurrencia y costo operacional; no se justifica añadir esa infraestructura antes de necesitarla.
+
+**Gobernanza.** Se agregarían catálogo y linaje desde el origen hasta Gold, contratos de esquema, controles de calidad automáticos, control de acceso por rol, gestión de secretos fuera del repositorio y retención y expiración documentadas. Las métricas de calidad se monitorearían en cada corrida.
+
+# 11. Trazabilidad M1 → M4
+
+| Decisión de diseño | Módulo | Fundamento aplicado | Evidencia en el repositorio |
+|---|---|---|---|
+| Separación OLTP/OLAP y análisis CAP | M1 | Las cargas transaccionales priorizan la consistencia de la compra; la capa analítica admite procesamiento por lote y lecturas históricas | `docs/entrega_final/M1_contexto_requisitos.md`, `docs/informe_final.md` |
+| Persistencia políglota: CockroachDB + Parquet + DuckDB; Redis conceptual | M2 | Elegir el modelo según el patrón de acceso: integridad relacional en OLTP y formato columnar más motor analítico para OLAP | `docs/entrega_final/M2_arquitectura_persistencia.md`, `oltp/init/01_schema.sql` |
+| Modelo dimensional en estrella y granularidad de hechos | M3 | Separar los procesos de ventas e intentos; dimensiones conformadas y métricas con granularidad explícita | `docs/diseno_dimensional.md`, `docs/modelo_dimensional.png` |
+| SCD Tipo 2 en la dimensión de zona | M3 | Preservar versiones históricas de atributos que cambian y resolver la vigencia por la fecha del hecho | `docs/informe_final.md`, `docs/entrega_final/consultas_sql_resultados.md` |
+| Ordenamiento, Hive, TIMESTAMP e índice compuesto | M4 | Diagnóstico basado en planes, intervención aislada y medición de beneficios y costos | `docs/entrega_final/M4_optimizacion_rendimiento.md`, `docs/taller4/planes/` |
+
+# Anexos {.salto}
+
+Los anexos no cuentan para el límite de páginas del informe. Reúnen las referencias exactas de evidencia y la lista de verificación de la entrega.
+
+## Anexo A. Referencias exactas
+
+| Evidencia | Ruta |
+|---|---|
+| Repositorio y ejecución | github.com/JPS4L4/tuboleta_lakehouse (rama `entrega-final`) |
+| Informe principal | `docs/informe_final.md` y `docs/informe_final.pdf` |
+| Guía del proyecto | `docs/guia_proyecto.md` y `docs/guia_proyecto.pdf` |
+| Contexto y requisitos M1 | `docs/entrega_final/M1_contexto_requisitos.md` |
+| Arquitectura M2 | `docs/entrega_final/M2_arquitectura_persistencia.md` |
+| Modelo dimensional | `docs/modelo_dimensional.png` y `docs/modelo_dimensional.dbml` |
+| Calidad Silver | `docs/reporte_calidad_silver.txt` |
+| Cinco consultas SQL de entrega | `docs/entrega_final/consultas_sql_resultados.md` |
+| Diagnóstico y optimización M4 | `docs/entrega_final/M4_optimizacion_rendimiento.md` |
+| Estadística reproducible M4 | `docs/entrega_final/estadistica_m4_reproducible.md` |
+| Planes DuckDB antes/después | `docs/taller4/planes/Q1_antes.txt`, `Q1_despues.txt`, `Q2_antes.txt`, `Q2_despues.txt`, `Q3_antes.txt`, `Q3_despues.txt` |
+| Planes CockroachDB | `docs/taller4/planes/cockroach_Q1_antes_full_scan.txt`, `cockroach_Q1_despues_index_scan.txt` |
+| Matriz de cumplimiento | `docs/entrega_final/matriz_cumplimiento.md` |
+| Diagrama general de arquitectura | `docs/entrega_final/arquitectura_general.svg` |
+
+## Anexo B. Lista de verificación de entrega
+
+- [x] Repositorio y rama de entrega identificados.
+- [x] Informe principal y documentos M1/M2/M4 presentes.
+- [x] Cinco consultas SQL de entrega documentadas.
+- [x] Reporte de calidad Silver presente.
+- [x] Diagrama dimensional PNG presente.
+- [x] Planes de ejecución antes/después presentes en `docs/taller4/planes/`.
+- [x] Resultados de benchmarks (corrida final del 26-11-2026) y limitaciones descritos.
+- [x] Dashboard no implementado: declarado explícitamente, sin evidencia ficticia.
+- [x] Ejecutar `python main.py` en el equipo de entrega y conservar la salida final (26-11-2026 16:40, `USE_SYNTHETIC=false`, 6,92 s).
+- [x] Ejecutar los tres laboratorios estadísticos y anexar `mediciones_crudas_*.csv` y `estadisticas_*.csv`; no reconstruir estadísticos desde medianas.
+- [x] Regenerar `docs/informe_final.pdf` después de integrar la versión final del informe y comprobar el número de páginas.
+- [ ] Verificar el contenido del ZIP final y confirmar que el docente tenga acceso a la rama/repositorio.
+
+**Estado de las ejecuciones locales:** los CSV estadísticos de M4, `python main.py` y el PDF consolidado se generaron o regeneraron en la corrida final del 26-11-2026; los mínimos, máximos y desviaciones estándar salen de esos CSV. Los puntos sin marcar requieren una confirmación fuera del repositorio y no pueden certificarse desde la documentación.
