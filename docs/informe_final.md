@@ -507,3 +507,14 @@ python -m scripts.consultar "SELECT COUNT(*) AS boletas FROM fact_ventas_boletas
 | `docs/entrega_final/consultas_sql_resultados.md` | Cinco consultas SQL completas con resultados de referencia |
 | `docs/entrega_final/estadistica_m4_reproducible.md` | Comandos y exportación de observaciones y estadísticos M4 |
 | `docs/benchmark.md` | Tabla y condiciones del benchmark |\n| `docs/entrega_final/M4_optimizacion_rendimiento.md` | Diagnóstico, cuatro técnicas M4, planes y resultados |
+
+
+---
+
+## 10. Complemento de cumplimiento de la plantilla final
+
+Para evitar duplicar el contenido técnico ya desarrollado en los módulos, los apartados de implementación, metodología detallada, dashboard (no implementado), lecciones aprendidas, evolución futura, trazabilidad M1→M4 y lista de verificación se consolidan en [docs/entrega_final/complemento_documental.md](entrega_final/complemento_documental.md).
+
+La matriz requisito–evidencia–estado está en [docs/entrega_final/matriz_cumplimiento.md](entrega_final/matriz_cumplimiento.md). El diagrama general de arquitectura está en [docs/entrega_final/arquitectura_general.svg](entrega_final/arquitectura_general.svg).
+
+**Pendientes que requieren ejecución local:** regenerar los CSV estadísticos de M4, ejecutar python main.py en el equipo de entrega y volver a generar/revisar el PDF consolidado. No se reportan mínimos, máximos ni desviaciones estándar hasta contar con las observaciones crudas.
