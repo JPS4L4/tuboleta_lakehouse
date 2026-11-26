@@ -441,7 +441,7 @@ El plan CockroachDB sin índice registró full scan de un millón de filas, 73 M
 
 Los experimentos se ejecutaron sobre datos sintéticos y en un CockroachDB de un solo nodo local. El benchmark de índice no representa ventas reales ni mide un clúster distribuido. Los archivos de evidencia, SQL completos, planes antes/después, entorno y comandos están en [`docs/taller4/`](taller4/) y en el documento [M4 — Diagnóstico y optimización](entrega_final/M4_optimizacion_rendimiento.md).
 
-**Estadística de dispersión.** Los artefactos disponibles conservan medianas y algunos rangos de corridas, pero no una desviación estándar cruda y homogénea para las cuatro técnicas. Por rigor, no se inventa ese valor; debe calcularse cuando se exporten las observaciones individuales de todas las repeticiones.
+**Estadística de dispersión.** Los resultados históricos de este informe conservan las medianas originales. Para la siguiente ejecución, los scripts M4 se actualizaron para exportar observaciones individuales y resúmenes con mediana, mínimo, máximo y desviación estándar muestral. Los archivos se generan localmente al ejecutar los comandos; no se sustituyen los resultados históricos hasta verificar esas nuevas mediciones. La guía está en [Estadística M4 reproducible](entrega_final/estadistica_m4_reproducible.md).
 
 # 7. Benchmark OLTP vs columnar {.salto}
 
@@ -504,4 +504,6 @@ python -m scripts.consultar "SELECT COUNT(*) AS boletas FROM fact_ventas_boletas
 | `docs/modelo_dimensional.dbml` y `.png` | Modelo en estrella |
 | `docs/reporte_calidad_silver.txt` | Bronze vs Silver |
 | `docs/resultados_consultas.md` | Salida de las nueve consultas |
+| `docs/entrega_final/consultas_sql_resultados.md` | Cinco consultas SQL completas con resultados de referencia |
+| `docs/entrega_final/estadistica_m4_reproducible.md` | Comandos y exportación de observaciones y estadísticos M4 |
 | `docs/benchmark.md` | Tabla y condiciones del benchmark |\n| `docs/entrega_final/M4_optimizacion_rendimiento.md` | Diagnóstico, cuatro técnicas M4, planes y resultados |
