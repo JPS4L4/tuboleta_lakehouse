@@ -1,6 +1,6 @@
 """Intervencion de tipos: fecha texto en control VARCHAR frente a TIMESTAMP en Silver."""
 from __future__ import annotations
-import statistics, time
+import csv, statistics, time
 from pathlib import Path
 import duckdb
 
@@ -9,12 +9,14 @@ SILVER=ROOT/"lakehouse"/"silver"
 OUT=ROOT/"docs"/"taller4"
 PLANES=OUT/"planes"
 
-def median(con,sql):
+OBSERVACIONES=[]
+def median(con,sql,label):
     con.execute(sql).fetchall()
     values=[]
     for _ in range(9):
         start=time.perf_counter(); con.execute(sql).fetchall()
         values.append((time.perf_counter()-start)*1000)
+    OBSERVACIONES.extend((label,i,v) for i,v in enumerate(values,1))
     return statistics.median(values)
 
 def main():
@@ -41,7 +43,7 @@ def main():
     PLANES.mkdir(parents=True,exist_ok=True)
     (PLANES/"Q3_tipos_antes_texto.txt").write_text(plan_a,encoding="utf-8")
     (PLANES/"Q3_tipos_despues_timestamp.txt").write_text(plan_b,encoding="utf-8")
-    before=median(con,q_text); after=median(con,q_typed)
+    before=median(con,q_text,"VARCHAR_CAST"); after=median(con,q_typed,"TIMESTAMP")
     OUT.mkdir(parents=True,exist_ok=True)
     md=["# Intervención de tipos — texto frente a TIMESTAMP","",
         f"- Control: mismas filas Silver; fecha_compra se serializa como VARCHAR.",
@@ -59,6 +61,13 @@ def main():
         "- planes/Q3_tipos_antes_texto.txt",
         "- planes/Q3_tipos_despues_timestamp.txt"]
     (OUT/"intervencion_tipos.md").write_text("\n".join(md),encoding="utf-8")
+    with (OUT/"mediciones_crudas_tipos.csv").open("w",newline="",encoding="utf-8") as f:
+        w=csv.writer(f); w.writerow(["escenario","repeticion","tiempo_ms"]); w.writerows(OBSERVACIONES)
+    with (OUT/"estadisticas_tipos.csv").open("w",newline="",encoding="utf-8") as f:
+        w=csv.writer(f); w.writerow(["escenario","n","mediana_ms","min_ms","max_ms","desviacion_estandar_muestral_ms"])
+        for label in ("VARCHAR_CAST","TIMESTAMP"):
+            vals=[v for name,_,v in OBSERVACIONES if name==label]
+            w.writerow([label,len(vals),f"{statistics.median(vals):.4f}",f"{min(vals):.4f}",f"{max(vals):.4f}",f"{statistics.stdev(vals):.4f}"])
     print("\n".join(md))
 
 if __name__=="__main__": main()
