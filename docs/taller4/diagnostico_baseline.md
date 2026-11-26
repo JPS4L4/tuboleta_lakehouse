@@ -28,9 +28,9 @@ GROUP BY 1, 2
 
 | Campo | Valor |
 |---|---|
-| Tiempo baseline (mediana) | **5,09 ms** |
+| Tiempo baseline (mediana) | **4,97 ms** |
 | Motor usado | DuckDB 2.0.0 sobre Parquet |
-| Operador más costoso | `TABLE_SCAN` sobre `fact_ventas_boletas`: 1,10 ms de CPU, el 42 % de la CPU de todos los operadores (2,65 ms), `Row Groups Scanned: 1 / 1`, `Data Read: 640,9 kB`, cardinalidad estimada de entrada 208.236 filas, 34.039 filas emitidas, 2 filas devueltas por la consulta |
+| Operador más costoso | `TABLE_SCAN` sobre `fact_ventas_boletas`: 0,68 ms de CPU, el 32 % de la CPU de todos los operadores (2,14 ms), `Row Groups Scanned: 1 / 1`, `Data Read: 261,1 kB`, cardinalidad estimada de entrada 208.236 filas, 34.039 filas emitidas, 2 filas devueltas por la consulta |
 | Problema identificado | **Acceso secuencial (full scan) sin data skipping posible.** La fact se escribió en un único row group y sin orden por `tiempo_sk` (`is_monotonic_increasing = False`). El filtro por mes llega a la fact como filtro dinámico del join (`Dynamic Filters: tiempo_sk IN PRF(tiempo_sk)`), pero el único zonemap min/max del archivo cubre todo el rango (2026022310–2026101623). Por eso no se puede descartar ningún bloque: se decodifica la tabla completa para quedarse con el 16,3 % de las filas. |
 | Indicador que lo revela | **Indicador 1, acceso secuencial:** 208.236 filas leídas frente a 2 devueltas. Su causa raíz es el **Indicador 4, data skipping ausente:** `Row Groups Scanned: 1 / 1` aunque se filtra un rango temporal. |
 | Indicadores descartados | **3:** dos `HASH_JOIN` (`INNER`, condiciones `tiempo_sk = tiempo_sk` y `evento_sk = evento_sk`), sin `CROSS_JOIN` ni nested loop. El lado build son las dimensiones pequeñas (720 y 5 filas), que es lo correcto. **5:** `mes` es `INTEGER` y se compara con el literal entero `9` (`Filters: mes = 9`), sin `CAST` en el predicado. El `CAST(#1 AS TINYINT)` del plan está en una proyección interna del agrupamiento, no en el filtro. |
@@ -55,14 +55,14 @@ GROUP BY 1
 
 | Campo | Valor |
 |---|---|
-| Tiempo baseline (mediana) | **2,31 ms** |
+| Tiempo baseline (mediana) | **2,44 ms** |
 | Motor usado | DuckDB 2.0.0 sobre Parquet |
-| Operador más costoso | `TABLE_SCAN` sobre `fact_ventas_boletas`: 1,04 ms de CPU, el 86 % de la CPU de todos los operadores (1,21 ms), `Row Groups Scanned: 1 / 1`, `Data Read: 583,7 kB`, 34.039 filas emitidas de 208.236, 4 filas devueltas |
+| Operador más costoso | `TABLE_SCAN` sobre `fact_ventas_boletas`: 0,51 ms de CPU, el 83 % de la CPU de todos los operadores (0,61 ms), `Row Groups Scanned: 1 / 1`, `Data Read: 246,3 kB`, 34.039 filas emitidas de 208.236, 4 filas devueltas |
 | Problema identificado | **Acceso secuencial sobre un único archivo.** El filtro sí se empuja al scan (`Filters: (tiempo_sk >= 2026090100) AND (tiempo_sk <= 2026093023)`), pero se aplica fila por fila después de leer el archivo completo. Septiembre representa el 16,3 % de la fact, y aun así se leen el 100 % de los datos de las 3 columnas proyectadas. |
 | Indicador que lo revela | **Indicador 1, acceso secuencial:** el archivo se lee completo para devolver 4 filas. La causa es la misma que en Q1, el **Indicador 4** (`1 / 1` row groups), pero aquí el filtro está directo sobre la fact, lo que permite atacarlo con particionado por mes. |
 | Indicadores descartados | **2:** se estimaron 41.647 filas y fueron 34.039 (1,2x), una estimación coherente. **3:** no aplica, la consulta no tiene joins. **5:** `tiempo_sk` es `BIGINT` y se compara con literales enteros; el predicado aparece en el plan sin conversión. |
 
-**Lectura del plan.** El plan es lineal: `TABLE_SCAN` (con filtro empujado) → dos `PROJECTION` → `PERFECT_HASH_GROUP_BY`. DuckDB elige el *perfect* hash porque `zona_sk` tiene un dominio pequeño y conocido (estima 6 grupos, que son las versiones SCD2 de `dim_zona`; salen 4 zonas con ventas). El scan concentra casi toda la CPU de la consulta; la agregación es barata (0,12 ms).
+**Lectura del plan.** El plan es lineal: `TABLE_SCAN` (con filtro empujado) → dos `PROJECTION` → `PERFECT_HASH_GROUP_BY`. DuckDB elige el *perfect* hash porque `zona_sk` tiene un dominio pequeño y conocido (estima 6 grupos, que son las versiones SCD2 de `dim_zona`; salen 4 zonas con ventas). El scan concentra casi toda la CPU de la consulta; la agregación es barata (0,08 ms).
 
 ---
 
@@ -77,14 +77,14 @@ GROUP BY 1
 
 | Campo | Valor |
 |---|---|
-| Tiempo baseline (mediana) | **4,98 ms** (vistas sobre Parquet) |
+| Tiempo baseline (mediana) | **5,49 ms** (vistas sobre Parquet) |
 | Motor usado | DuckDB 2.0.0 sobre Parquet |
-| Operador más costoso | `TABLE_SCAN` sobre `fact_intentos_compra`: 1,23 ms de CPU (43 % de 2,86 ms), 260.294 filas, `Data Read: 232,3 kB`. Le sigue `HASH_GROUP_BY` con 0,98 ms (5 grupos). |
+| Operador más costoso | `TABLE_SCAN` sobre `fact_intentos_compra`: 1,87 ms de CPU (41 % de 4,54 ms), 260.294 filas, `Data Read: 165,7 kB`. Le sigue `HASH_GROUP_BY` con 1,73 ms (5 grupos). |
 | Problema identificado | **Ninguno de acceso.** La consulta no tiene `WHERE`: agrega todos los intentos de compra. Leer las 260.294 filas no es un desperdicio, es lo que la consulta necesita. No existe un subconjunto que un índice, un zonemap o una partición pudieran evitar. Diagnóstico honesto: el plan ya es el adecuado para su selectividad (100 %). |
 | Indicador que lo revela | **Ninguno.** Hay muchas más filas leídas (260.294) que devueltas (5), pero eso no es el Indicador 1: no hay filtro que haga selectiva la consulta, y la reducción la produce la agregación, no el acceso. |
 | Indicadores descartados | **2:** las estimaciones son exactas (260.294 = 260.294 y 5 = 5). **3:** `HASH_JOIN` `INNER` con build en `dim_evento` (5 filas), sin `CROSS_JOIN`. **4 y 5:** no aplican porque no hay predicado. |
 
-**Uso en el taller.** Q3 se usa como experimento de control con I-2 (`ANALYZE`). Si las estimaciones ya son exactas, actualizar estadísticas no debería cambiar ni el plan ni el tiempo. Para que `ANALYZE` tenga un objeto real, el control se mide sobre tablas materializadas (antes y después en la misma conexión; ver `Q3_antes_analyze.txt`). Por eso el "t antes" de Q3 en `benchmarks.md` (≈2,5 ms) es menor que este baseline sobre Parquet: materializar elimina la decodificación del archivo.
+**Uso en el taller.** Q3 se usa como experimento de control con I-2 (`ANALYZE`). Si las estimaciones ya son exactas, actualizar estadísticas no debería cambiar ni el plan ni el tiempo. Para que `ANALYZE` tenga un objeto real, el control se mide sobre tablas materializadas (antes y después en la misma conexión; ver `Q3_antes_analyze.txt`). Por eso el "t antes" de Q3 en `benchmarks.md` (≈2,65 ms) es menor que este baseline sobre Parquet: materializar elimina la decodificación del archivo.
 
 ---
 
@@ -98,9 +98,9 @@ El enunciado recomienda ejecutar `ANALYZE` antes de cualquier otra intervención
 
 | Query | Baseline | Operador más costoso | Problema | Indicador | Intervención prevista |
 |---|---:|---|---|---|---|
-| Q1 | 5,09 ms | `TABLE_SCAN` fact (1,10 ms CPU, 1/1 row groups, 640,9 kB) | Full scan sin data skipping: 1 row group, fact sin ordenar | 1 → 4 (y 2 secundario: 20,6x) | I-3: ordenar por `tiempo_sk`, `row_group_size=20_000` |
-| Q2 | 2,31 ms | `TABLE_SCAN` fact (1,04 ms CPU, 86 %, 583,7 kB) | Full scan de un archivo único para un 16,3 % de filas | 1 → 4 | I-6: particionado Hive `year=/month=` |
-| Q3 | 4,98 ms | `TABLE_SCAN` intentos (1,23 ms CPU) + `HASH_GROUP_BY` (0,98 ms CPU) | Ninguno: agregación total, sin filtro | Ninguno | I-2: `ANALYZE` (control, se espera ≈1,0x) |
+| Q1 | 4,97 ms | `TABLE_SCAN` fact (0,68 ms CPU, 1/1 row groups, 261,1 kB) | Full scan sin data skipping: 1 row group, fact sin ordenar | 1 → 4 (y 2 secundario: 20,6x) | I-3: ordenar por `tiempo_sk`, `row_group_size=20_000` |
+| Q2 | 2,44 ms | `TABLE_SCAN` fact (0,51 ms CPU, 83 %, 246,3 kB) | Full scan de un archivo único para un 16,3 % de filas | 1 → 4 | I-6: particionado Hive `year=/month=` |
+| Q3 | 5,49 ms | `TABLE_SCAN` intentos (1,87 ms CPU) + `HASH_GROUP_BY` (1,73 ms CPU) | Ninguno: agregación total, sin filtro | Ninguno | I-2: `ANALYZE` (control, se espera ≈1,0x) |
 
 **Advertencia de escala.** Las tres consultas tardan entre 2 y 5 ms. Con 208.000 y 260.000 filas, el overhead fijo del motor (planificación, abrir archivos y recolectar el resultado) pesa tanto como el scan. Por eso la reducción de datos leídos debe medirse en bytes y row groups, no solo en milisegundos.
 

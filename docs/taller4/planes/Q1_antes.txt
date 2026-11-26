@@ -1,6 +1,6 @@
 ╭─ Summary ───────────╮
-│ Total Time: 0.0081s │
-│ Data Read: 640.9 kB │
+│ Total Time: 0.0077s │
+│ Data Read: 261.1 kB │
 ╰─────────────────────╯
 ╭─ Projection ───────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ Projections: #0, CAST(#1 AS INTEGER), #2, #3                                                                       │
@@ -40,7 +40,7 @@
 │ Filename(s):                                                                                                       │  │ Function: READ_PARQUET                                                                                    │
 │ <repo>\lakehouse\gold\fact_ventas_boletas.parquet │  │ Projections: tiempo_sk, mes                                                                               │
 │ Row Groups Scanned: 1 / 1                                                                                          │  │ Filters: mes = 9                                                                                          │
-│ 34,039 rows                                                                                                    0µs │  │ Total Files Read: 1                                                                                       │
+│ 36,087 rows                                                                                                    0µs │  │ Total Files Read: 1                                                                                       │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯  │ Filename(s):                                                                                              │
                                                                                                                         │ <repo>\lakehouse\gold\dim_tiempo.parquet │
                                                                                                                         │ Row Groups Scanned: 1 / 1                                                                                 │

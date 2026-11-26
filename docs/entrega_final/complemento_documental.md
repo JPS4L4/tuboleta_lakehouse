@@ -134,7 +134,7 @@ Los resultados documentados corresponden a la ejecución de referencia indicada 
 
 La comparación SQLite vs. DuckDB del informe evalúa una consulta analítica equivalente sobre Silver/Parquet y Gold/Parquet. No es una comparación directa de CockroachDB contra DuckDB. El experimento de CockroachDB es independiente y evalúa el efecto de un índice compuesto en una tabla OLTP de laboratorio.
 
-Por tanto, el resultado de 26,2x se debe expresar como: “DuckDB sobre Gold fue 26,2 veces más rápido que SQLite en la consulta, conjunto de datos y entorno documentados”. No se debe generalizar a toda carga ni atribuir exclusivamente al formato Parquet, porque también intervienen el modelo Gold, el motor y el paralelismo.
+Por tanto, el resultado de 28,4x (corrida final del 26-11-2026) se debe expresar como: “DuckDB sobre Gold fue 28,4 veces más rápido que SQLite en la consulta, conjunto de datos y entorno documentados”. No se debe generalizar a toda carga ni atribuir exclusivamente al formato Parquet, porque también intervienen el modelo Gold, el motor y el paralelismo.
 
 ### 3.3 Dashboard
 
@@ -155,7 +155,7 @@ Los protocolos no son idénticos entre todos los experimentos y deben mantenerse
 
 Los planes y perfiles están en `docs/taller4/planes/`. La guía `docs/entrega_final/estadistica_m4_reproducible.md` describe cómo ejecutar los scripts que exportan observaciones individuales y estadísticos.
 
-Los históricos disponibles no contienen todas las observaciones crudas necesarias para reconstruir retrospectivamente mínimo, máximo y desviación estándar. No se inventan esos estadísticos. Para completar esa columna se deben ejecutar los comandos en el equipo de entrega y anexar los CSV resultantes. Las medianas históricas que ya están documentadas se conservan como resultados de sus corridas originales.
+La corrida final del 26-11-2026 conservó las observaciones individuales de cada repetición (`docs/taller4/mediciones_crudas_*.csv`) y sus resúmenes con mediana, mínimo, máximo y desviación estándar muestral (`estadisticas_*.csv`). Los estadísticos de este documento se copiaron de esos CSV; no se infirieron desde medianas de corridas anteriores, que además diferían (por ejemplo, 2,08x en la lectura con índice y 3,98x en tipos).
 
 ### 4.2 Comandos de medición
 
@@ -171,15 +171,35 @@ Los archivos esperados y el protocolo se detallan en `docs/entrega_final/estadis
 
 ### 4.3 Resultados y lectura técnica
 
+Cifras de la corrida final del 26-11-2026 (Python 3.14.6, DuckDB 2.0.0, CockroachDB v25.4.0 de un solo nodo en Docker, Windows 11, AMD64; pipeline extraído desde CockroachDB con `USE_SYNTHETIC=false`). Las medianas de corridas de desarrollo anteriores fueron distintas.
+
 | Técnica | Antes | Después | Lectura |
 |---|---:|---:|---|
-| Ordenamiento / Q1 | 5,09 ms | 4,83 ms | 1,05x; bytes 640,9 → 142,4 kB; 3 de 11 row groups escaneados |
-| Hive / Q2 | 2,31 ms | 2,55 ms | 0,91x; bytes 583,7 → 58,8 kB; se leyó 1 de 9 archivos, pero el overhead empeoró el tiempo |
-| VARCHAR + CAST → TIMESTAMP | 19,887 ms | 4,996 ms | 3,98x; se preservó el resultado lógico |
-| Índice CockroachDB | 687,713 ms | 331,261 ms | 2,08x en lectura; 163.137 frente a 1.000.000 filas decodificadas |
-| Costo del índice en INSERT | 460,19 ms | 508,56 ms | 10,5 % más lento con índice |
+| Ordenamiento / Q1 | 4,97 ms | 5,02 ms | 0,99x, sin ganancia de tiempo; bytes 261,1 → 142,4 kB (1,8x menos); 3 de 11 row groups escaneados |
+| Hive / Q2 | 2,44 ms | 3,14 ms | 0,78x (29 % más lento); bytes 246,3 → 58,8 kB (4,2x menos); se leyó 1 de 9 archivos, pero el overhead empeoró el tiempo |
+| VARCHAR + CAST → TIMESTAMP | 14,338 ms | 4,285 ms | 3,35x; se preservó el resultado lógico |
+| Índice CockroachDB | 426,217 ms | 210,591 ms | 2,02x en lectura; 164.066 frente a 1.000.000 filas decodificadas |
+| Costo del índice en INSERT | 308,35 ms | 358,24 ms | 16,2 % más lento con índice (1,16x) |
 
-La optimización Hive es un resultado negativo en tiempo de pared, aunque positivo en reducción de lectura. El particionamiento introduce costos de descubrimiento/listado de archivos y metadatos; con este volumen, esos costos superan el ahorro. El índice reduce el trabajo de lectura, pero encarece las escrituras porque debe mantenerse al insertar.
+**Estadística consolidada** (copiada de `estadisticas_duckdb.csv`, `estadisticas_tipos.csv` y `estadisticas_cockroach.csv`; los controles complementarios de 15 corridas son otro protocolo y no se mezclan):
+
+| Medición | Escenario | n | Mediana (ms) | Mín (ms) | Máx (ms) | Desv. est. (ms) |
+|---|---|---:|---:|---:|---:|---:|
+| Q1 | antes (fact original) | 5 | 4,9685 | 4,7801 | 5,2538 | 0,1792 |
+| Q1 | después (ordenada, I-3) | 5 | 5,0216 | 4,5836 | 5,2936 | 0,2823 |
+| Q2 | antes (archivo único) | 5 | 2,4360 | 2,1812 | 3,1896 | 0,3907 |
+| Q2 | después (Hive, I-6) | 5 | 3,1393 | 2,7268 | 3,3723 | 0,2582 |
+| Q3 | baseline sobre Parquet | 5 | 5,4853 | 5,3407 | 5,7529 | 0,1890 |
+| Q3 | antes de ANALYZE (tablas) | 5 | 2,6504 | 2,5614 | 2,7622 | 0,0866 |
+| Q3 | después de ANALYZE (I-2) | 5 | 2,6927 | 2,6167 | 3,2044 | 0,2457 |
+| Tipos | VARCHAR + CAST | 9 | 14,3377 | 14,0580 | 15,0341 | 0,3086 |
+| Tipos | TIMESTAMP | 9 | 4,2851 | 3,8062 | 4,3746 | 0,2157 |
+| CockroachDB lectura | sin índice | 7 | 426,2172 | 414,8571 | 443,1641 | 11,3913 |
+| CockroachDB lectura | con índice | 7 | 210,5908 | 208,7586 | 211,9116 | 1,1191 |
+| CockroachDB INSERT 20.000 | sin índice | 3 | 308,3453 | 306,7608 | 332,5851 | 14,4740 |
+| CockroachDB INSERT 20.000 | con índice | 3 | 358,2443 | 348,7881 | 386,8234 | 19,8026 |
+
+El ordenamiento de Q1 tampoco mejoró el tiempo (0,99x): la diferencia de medianas (0,05 ms) es menor que las desviaciones (0,18 y 0,28 ms). La optimización Hive es un resultado negativo en tiempo de pared, aunque positivo en reducción de lectura. El particionamiento introduce costos de descubrimiento/listado de archivos y metadatos; con este volumen, esos costos superan el ahorro. El índice reduce el trabajo de lectura, pero encarece las escrituras porque debe mantenerse al insertar.
 
 ## 5. Lecciones aprendidas y trabajo futuro
 
@@ -188,7 +208,7 @@ La optimización Hive es un resultado negativo en tiempo de pared, aunque positi
 1. **Ordenamiento como propiedad de Gold desde el primer diseño.** Ordenar la fact de ventas por `tiempo_sk` al materializar Gold permitiría que filtros temporales aprovechen row groups desde la primera versión, en lugar de aplicar el ordenamiento como experimento posterior.
 2. **Tipos temporales correctos en la frontera de Silver.** La fecha debe convertirse a TIMESTAMP durante la estandarización y no esperar hasta la consulta analítica. Esto elimina CAST repetidos y reduce errores semánticos.
 3. **Particionado condicionado por volumen y selectividad.** No activaríamos Hive automáticamente para cualquier tabla. La prueba mostró menos bytes leídos, pero peor tiempo total. Lo habilitaríamos cuando el volumen y la selectividad justifiquen el costo de metadatos, validándolo con benchmark.
-4. **Índices guiados por consultas y costo de escritura.** Mantendríamos el índice compuesto solo si el patrón de lectura lo justifica. La mejora de lectura de 2,08x debe contrastarse con el aumento de 10,5 % en el lote de inserción.
+4. **Índices guiados por consultas y costo de escritura.** Mantendríamos el índice compuesto solo si el patrón de lectura lo justifica. La mejora de lectura de 2,02x debe contrastarse con el aumento de 16,2 % en el lote de inserción.
 5. **Separación explícita de datos de prueba y datos de negocio.** El benchmark de un millón de filas debe permanecer aislado de las tablas funcionales y claramente identificado como carga experimental.
 6. **Automatizar validaciones y estadísticas.** El pipeline debería producir automáticamente conteos, aserciones, planes, muestras crudas y resumen estadístico por ejecución, con identificador de corrida y configuración registrada.
 
@@ -244,11 +264,11 @@ La optimización Hive es un resultado negativo en tiempo de pared, aunque positi
 - [x] Reporte de calidad Silver presente.
 - [x] Diagrama dimensional PNG presente.
 - [x] Planes de ejecución antes/después presentes en `docs/taller4/planes/`.
-- [x] Resultados históricos de benchmarks y limitaciones descritos.
+- [x] Resultados de benchmarks (corrida final del 26-11-2026) y limitaciones descritos.
 - [x] Dashboard no implementado: declarado explícitamente, sin evidencia ficticia.
-- [ ] Ejecutar `python main.py` en el equipo de entrega y conservar la salida final.
-- [ ] Ejecutar los tres laboratorios estadísticos y anexar `mediciones_crudas_*.csv` y `estadisticas_*.csv`; no reconstruir estadísticos desde medianas.
-- [ ] Regenerar `docs/informe_final.pdf` después de integrar la versión final del informe y comprobar el número de páginas.
+- [x] Ejecutar `python main.py` en el equipo de entrega y conservar la salida final (26-11-2026 16:40, `USE_SYNTHETIC=false`, 6,92 s).
+- [x] Ejecutar los tres laboratorios estadísticos y anexar `mediciones_crudas_*.csv` y `estadisticas_*.csv`; no reconstruir estadísticos desde medianas.
+- [x] Regenerar `docs/informe_final.pdf` después de integrar la versión final del informe y comprobar el número de páginas.
 - [ ] Confirmar que la rama/repositorio sea accesible para el docente.
 
-Los puntos sin marcar requieren ejecución o verificación en el equipo local y no pueden certificarse desde la documentación del repositorio.
+El punto sin marcar requiere una confirmación fuera del repositorio y no puede certificarse desde la documentación.

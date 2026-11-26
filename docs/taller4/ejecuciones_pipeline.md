@@ -1,6 +1,6 @@
 # Evidencia de ejecuciones del pipeline — Taller 4
 
-Fecha de las salidas compartidas: 16-11-2026. Este documento separa las ejecuciones por fuente y hora; sus conteos no deben combinarse como si pertenecieran a una sola carga. Se añadió la repetición CockroachDB verificada a las 23:19.
+Fecha de las salidas compartidas: 16-11-2026. Este documento separa las ejecuciones por fuente y hora; sus conteos no deben combinarse como si pertenecieran a una sola carga. Se añadió la repetición CockroachDB verificada a las 23:19 y la corrida final del 26-11-2026 a las 16:40, de la que provienen las cifras vigentes.
 
 ## 1. Escenario A — generación sintética directa
 
@@ -72,7 +72,18 @@ La corrida más reciente también usó `USE_SYNTHETIC=false` contra CockroachDB 
 | compras_confirmadas | 208.236 | 3.101 | 3.101 |
 | intentos_compra | 260.294 | 3.906 | 3.906 |
 
-Silver convirtió esos valores a `DESCONOCIDO`. Esto valida el transporte CockroachDB → Bronze y la imputación Bronze → Silver. El contenido almacenado en CockroachDB provino del generador sintético del laboratorio; no son ventas reales de TuBoleta. El reporte de calidad generado a las 23:19 está en [`../reporte_calidad_silver.txt`](../reporte_calidad_silver.txt).
+Silver convirtió esos valores a `DESCONOCIDO`. Esto valida el transporte CockroachDB → Bronze y la imputación Bronze → Silver. El contenido almacenado en CockroachDB provino del generador sintético del laboratorio; no son ventas reales de TuBoleta. El reporte de calidad de las 23:19 fue sobrescrito por el de la corrida final del 26-11-2026 (16:40), que está en [`../reporte_calidad_silver.txt`](../reporte_calidad_silver.txt) y repite las mismas cifras.
+
+### Corrida final CockroachDB — 26-11-2026 16:40
+
+La corrida final de la entrega usó `USE_SYNTHETIC=false` contra CockroachDB v25.4.0 (la salida reporta `Fuente: CockroachDB`). Bronze y Silver conservaron todas las filas (100 % retenido, cero duplicados y cero filas sin clave) y Silver imputó los NULL de `canal_id` como `DESCONOCIDO`:
+
+| Tabla | Filas Bronze | NULL imputados en Silver |
+|---|---:|---:|
+| compras_confirmadas | 208.236 | 3.101 |
+| intentos_compra | 260.294 | 3.906 |
+
+La suma de precio de compras confirmadas fue 22.126.123.800 COP en Bronze y en Silver, y Gold produjo 208.236 ventas y 260.294 intentos. El reporte de calidad de esa corrida es el actual [`../reporte_calidad_silver.txt`](../reporte_calidad_silver.txt) (16:40). Las cifras de rendimiento de esta corrida están en las secciones 3 a 5.
 
 ### Gold y validaciones
 
@@ -90,7 +101,7 @@ Cada fila corresponde a una ejecución independiente del benchmark SQLite frente
 | DuckDB Bronze vs SQLite | 4,0x | 2,8x |
 | DuckDB Gold vs SQLite | 28,5x | 27,3x |
 
-Las cifras comparan el tiempo de consulta analítica sobre los conjuntos producidos por cada ruta; no miden el tiempo de carga de CockroachDB ni el costo de extracción. No deben presentarse como benchmark del índice OLTP. La ejecución más reciente (23:20) está en [`../benchmark.md`](../benchmark.md): SQLite 444,01 ms, DuckDB Bronze 169,22 ms y DuckDB Gold 16,97 ms.
+Las cifras comparan el tiempo de consulta analítica sobre los conjuntos producidos por cada ruta; no miden el tiempo de carga de CockroachDB ni el costo de extracción. No deben presentarse como benchmark del índice OLTP. La corrida final (26-11-2026 16:40, CockroachDB como fuente) está en [`../benchmark.md`](../benchmark.md): SQLite 287,29 ms, DuckDB Bronze 112,38 ms y DuckDB Gold 10,12 ms (28,4x frente a SQLite). Para comparar, la ejecución del 16-11-2026 23:20 había medido SQLite 444,01 ms, DuckDB Bronze 169,22 ms y DuckDB Gold 16,97 ms (26,2x); la tabla de arriba y esa medición son históricas.
 
 ## 4. Duración del pipeline
 
@@ -103,19 +114,19 @@ Las cifras comparan el tiempo de consulta analítica sobre los conjuntos produci
 | **Total** | **10,38 s** | **10,64 s** |
 
 Son tiempos de las corridas compartidas en el entorno local, no garantías de rendimiento para otras máquinas.
-La repetición CockroachDB del 23:19 finalizó en 10,44 s.
+La repetición CockroachDB del 23:19 finalizó en 10,44 s. La corrida final del 26-11-2026 16:40 finalizó en 6,92 s (extracción 1,35 s; Bronze → Silver 0,34 s; Silver → Gold 1,08 s; análisis 4,15 s).
 
 ## 5. Experimentos OLTP y conversión de tipos
 
-Los siguientes experimentos se midieron por separado del pipeline funcional:
+Los siguientes experimentos se midieron por separado del pipeline funcional (corrida final del 26-11-2026; mínimos, máximos y desviaciones estándar en los CSV `estadisticas_*.csv` de `docs/taller4/`):
 
 | Experimento | Antes | Después | Resultado |
 |---|---:|---:|---|
-| Consulta OLTP CockroachDB | 687,713 ms sin índice | 331,261 ms con índice compuesto | 2,08x más rápida |
-| Inserción OLTP (20.000 filas) | 460,19 ms sin índice | 508,56 ms con índice | 10,5 % más lenta |
-| Fecha en DuckDB | 19,887 ms (`VARCHAR` + `CAST`) | 4,996 ms (`TIMESTAMP`) | 3,98x más rápida |
+| Consulta OLTP CockroachDB | 426,217 ms sin índice | 210,591 ms con índice compuesto | 2,02x más rápida |
+| Inserción OLTP (20.000 filas) | 308,35 ms sin índice | 358,24 ms con índice | 16,2 % más lenta |
+| Fecha en DuckDB | 14,338 ms (`VARCHAR` + `CAST`) | 4,285 ms (`TIMESTAMP`) | 3,35x más rápida |
 
-`EXPLAIN ANALYZE` registró 1.000.000 de filas / 73 MiB / 983 ms sin índice y 163.137 filas / 9,7 MiB / 404 ms con índice. Las medianas de consulta son siete ejecuciones; la inserción usa la mediana de tres lotes. La comparación de tipos usa las mismas filas Silver, y ambos casos devolvieron 34.039 ventas y 3.689.715.500 COP. Los resultados completos y sus limitaciones están en [`benchmarks_cockroach.md`](benchmarks_cockroach.md), [`intervencion_tipos.md`](intervencion_tipos.md) y los planes bajo `planes/`.
+`EXPLAIN ANALYZE` registró 1.000.000 de filas / 73 MiB / 732 ms sin índice y 164.066 filas / 9,7 MiB / 241 ms con índice. Las medianas de consulta son siete ejecuciones; la inserción usa la mediana de tres lotes. La comparación de tipos usa las mismas filas Silver, y ambos casos devolvieron 34.039 ventas y 3.689.715.500 COP. Los resultados completos y sus limitaciones están en [`benchmarks_cockroach.md`](benchmarks_cockroach.md), [`intervencion_tipos.md`](intervencion_tipos.md) y los planes bajo `planes/`.
 
 Comandos para repetir los experimentos:
 

@@ -89,7 +89,7 @@ Bronze es el dato crudo. Para que Silver tenga trabajo real, el generador sinté
 
 El detalle de cada ejecución queda en [`docs/reporte_calidad_silver.txt`](docs/reporte_calidad_silver.txt).
 
-**Las rutas de ejecución no deben confundirse.** En modo sintético directo (`USE_SYNTHETIC=true`), Bronze contiene duplicados, filas sin clave y NULL de `canal_id`; Silver demuestra su limpieza e imputación. En modo CockroachDB (`USE_SYNTHETIC=false`), la extracción refleja lo almacenado. Una corrida anterior no tenía NULL, pero la repetición verificada de las 23:19 conservó 3.101 NULL de compras y 3.906 de intentos en CockroachDB y Bronze; Silver los imputó como `DESCONOCIDO`. La base contiene el snapshot sintético del laboratorio, no ventas reales. Los conteos y corridas se separan en [docs/taller4/ejecuciones_pipeline.md](docs/taller4/ejecuciones_pipeline.md).
+**Las rutas de ejecución no deben confundirse.** En modo sintético directo (`USE_SYNTHETIC=true`), Bronze contiene duplicados, filas sin clave y NULL de `canal_id`; Silver demuestra su limpieza e imputación. En modo CockroachDB (`USE_SYNTHETIC=false`), la extracción refleja lo almacenado. Una corrida anterior no tenía NULL, pero las repeticiones verificadas (16-11-2026 a las 23:19 y la corrida final del 26-11-2026 a las 16:40) conservaron 3.101 NULL de compras y 3.906 de intentos en CockroachDB y Bronze; Silver los imputó como `DESCONOCIDO`. La base contiene el snapshot sintético del laboratorio, no ventas reales. Los conteos y corridas se separan en [docs/taller4/ejecuciones_pipeline.md](docs/taller4/ejecuciones_pipeline.md).
 
 ## 4. Requisitos
 
@@ -109,7 +109,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-`main.py` corre extracción, Silver, Gold y análisis; imprime el tiempo de cada paso y termina con código 1 si alguno falla. Las corridas medidas tardaron alrededor de 10 segundos en este entorno. Los Parquet no se versionan: se regeneran en cada ejecución. Cada paso también se puede correr solo, por ejemplo `python -m scripts.transform_silver`.
+`main.py` corre extracción, Silver, Gold y análisis; imprime el tiempo de cada paso y termina con código 1 si alguno falla. La corrida final del 26-11-2026 tardó 6,92 s en este entorno (las corridas anteriores, alrededor de 10 s). Los Parquet no se versionan: se regeneran en cada ejecución. Cada paso también se puede correr solo, por ejemplo `python -m scripts.transform_silver`.
 
 Variables de entorno (opcionales):
 
@@ -194,11 +194,11 @@ Agregación: boletas e ingresos por **evento x zona x mes** (60 grupos), con 208
 
 | Motor | Fuente | Mediana (ms) | Mejora vs (a) |
 |---|---|---:|---:|
-| (a) SQLite, almacén por filas (OLTP-like) | Silver normalizado + índices típicos | 444,01 | 1,0x |
-| (b) DuckDB sobre Bronze crudo | Parquet sucio, limpieza dentro de la consulta | 169,22 | 2,6x |
-| (c) DuckDB sobre Gold (estrella) | Parquet columnar modelado | 16,97 | 26,2x |
+| (a) SQLite, almacén por filas (OLTP-like) | Silver normalizado + índices típicos | 287,29 | 1,0x |
+| (b) DuckDB sobre Bronze crudo | Parquet sucio, limpieza dentro de la consulta | 112,38 | 2,6x |
+| (c) DuckDB sobre Gold (estrella) | Parquet columnar modelado | 10,12 | 28,4x |
 
-**Análisis.** DuckDB sobre Gold fue unas 26 veces más rápido que el almacén por filas, y parte de la ventaja aparece al leer Parquet columnar sin modelar (2,6x en Bronze); el modelado en estrella aporta otro factor de 10 sobre Bronze, porque evita limpiar al vuelo y trabaja con claves enteras y dimensiones pequeñas. La comparación no es perfectamente "manzanas con manzanas": DuckDB usa varios hilos y SQLite solo uno; SQLite corre en memoria con índices pensados para buscar filas, no para recorrer 208.000 ventas. Los tiempos dependen de la máquina y de la corrida. Las cifras de arriba son las de `docs/benchmark.md`, ejecutadas el 16-11-2026 23:20.
+**Análisis.** DuckDB sobre Gold fue unas 28 veces más rápido que el almacén por filas, y parte de la ventaja aparece al leer Parquet columnar sin modelar (2,6x en Bronze); el modelado en estrella aporta otro factor de 11 sobre Bronze, porque evita limpiar al vuelo y trabaja con claves enteras y dimensiones pequeñas. La comparación no es perfectamente "manzanas con manzanas": DuckDB usa varios hilos y SQLite solo uno; SQLite corre en memoria con índices pensados para buscar filas, no para recorrer 208.000 ventas. Los tiempos dependen de la máquina y de la corrida. Las cifras de arriba son las de `docs/benchmark.md`, ejecutadas el 26-11-2026 16:40.
 
 ## 10. Resultados destacados
 
@@ -238,32 +238,35 @@ Evolución futura (CDC con Kafka, cargas incrementales, SCD2 en usuarios): ver [
 - [Diagrama general de arquitectura](docs/entrega_final/arquitectura_general.svg)
 - [Informe principal](docs/informe_final.md)
 
-## 12. Taller 4 — optimización: estado de entrega y pendientes
+## 12. Taller 4 — optimización: estado de entrega
 
-Esta sección funciona como checklist de auditoría. Distingue entre lo que ya está implementado/documentado en el repositorio y lo que todavía requiere una ejecución local antes de afirmar que la entrega está completamente reproducida.
+Esta sección funciona como checklist de auditoría. Todas las mediciones del Taller 4 se repitieron en una corrida final el 26-11-2026 y sus CSV crudos y estadísticos están versionados en `docs/taller4/`. Solo queda pendiente verificar el contenido del ZIP final.
 
 ### 12.1. Requisitos del taller y evidencia disponible
 
 | Requisito | Qué debe demostrarse | Estado en el repositorio | Evidencia principal |
 |---|---|---|---|
-| Ordenamiento + data skipping | Ordenar por `tiempo_sk`, dividir en row groups y demostrar descarte de grupos | **Implementado y documentado; falta repetir la medición local final** | `scripts/taller4_optimizacion.py`; `docs/taller4/planes/Q1_antes.txt`, `Q1_despues.txt`; `docs/taller4/benchmarks.md` |
-| Particionado Hive | Particionar por año/mes y demostrar partition pruning | **Implementado y documentado; falta repetir la medición local final** | `scripts/taller4_optimizacion.py`; planes Q2 antes/después; `docs/taller4/benchmarks.md` |
-| Corrección de tipos | Comparar fecha como VARCHAR + CAST frente a TIMESTAMP nativo, conservando el resultado | **Implementado y medido históricamente; falta regenerar CSV estadísticos** | `scripts/taller4_tipos.py`; `docs/taller4/intervencion_tipos.md`; planes `Q3_tipos_antes_texto.txt` y `Q3_tipos_despues_timestamp.txt` |
-| Índice compuesto CockroachDB | Comparar full scan e index scan en una tabla experimental de 1 millón de filas y medir el costo de INSERT | **Implementado y medido históricamente; falta regenerar CSV estadísticos** | `scripts/oltp/benchmark_cockroach.py`; `docs/taller4/benchmarks_cockroach.md`; planes CockroachDB antes/después |
+| Ordenamiento + data skipping | Ordenar por `tiempo_sk`, dividir en row groups y demostrar descarte de grupos | **Implementado, medido y documentado (corrida final del 26-11-2026)** | `scripts/taller4_optimizacion.py`; `docs/taller4/planes/Q1_antes.txt`, `Q1_despues.txt`; `docs/taller4/benchmarks.md`; `mediciones_crudas_duckdb.csv`, `estadisticas_duckdb.csv` |
+| Particionado Hive | Particionar por año/mes y demostrar partition pruning | **Implementado, medido y documentado (corrida final del 26-11-2026)** | `scripts/taller4_optimizacion.py`; planes Q2 antes/después; `docs/taller4/benchmarks.md`; `mediciones_crudas_duckdb.csv`, `estadisticas_duckdb.csv` |
+| Corrección de tipos | Comparar fecha como VARCHAR + CAST frente a TIMESTAMP nativo, conservando el resultado | **Implementado, medido y documentado (corrida final del 26-11-2026)** | `scripts/taller4_tipos.py`; `docs/taller4/intervencion_tipos.md`; planes `Q3_tipos_antes_texto.txt` y `Q3_tipos_despues_timestamp.txt`; `mediciones_crudas_tipos.csv`, `estadisticas_tipos.csv` |
+| Índice compuesto CockroachDB | Comparar full scan e index scan en una tabla experimental de 1 millón de filas y medir el costo de INSERT | **Implementado, medido y documentado (corrida final del 26-11-2026)** | `scripts/oltp/benchmark_cockroach.py`; `docs/taller4/benchmarks_cockroach.md`; planes CockroachDB antes/después; `mediciones_crudas_cockroach.csv`, `estadisticas_cockroach.csv` |
 
-### 12.2. Resultados históricos documentados
+### 12.2. Resultados de la corrida final (26-11-2026)
 
-Estos valores son resultados de ejecuciones anteriores registradas en la documentación. No son una promesa de que otra máquina obtendrá los mismos tiempos.
+Estas cifras provienen de la corrida final del 26-11-2026 en esta máquina (Python 3.14.6, DuckDB 2.0.0, CockroachDB v25.4.0 de un solo nodo en Docker, Windows 11, AMD64), con el pipeline extraído desde CockroachDB (`USE_SYNTHETIC=false`). Las medianas de corridas de desarrollo anteriores fueron distintas (por ejemplo, 2,08x en la lectura con índice y 3,98x en tipos); aquí se reporta esta corrida con sus CSV. No son una promesa de que otra máquina obtendrá los mismos tiempos.
 
-| Experimento | Antes | Después | Lectura correcta |
-|---|---:|---:|---|
-| Ordenamiento / Q1 | 5,09 ms | 4,83 ms | 4,5 veces menos bytes leídos; mejora temporal pequeña (~5 %) |
-| Hive / Q2 | 2,31 ms | 2,55 ms | 9,9 veces menos bytes; tiempo ~9 % peor por overhead de archivos/particiones |
-| VARCHAR → TIMESTAMP | 19,887 ms | 4,996 ms | 3,98x más rápido; mismos 34.039 registros y 3.689.715.500 COP |
-| Índice CockroachDB / lectura | 687,713 ms | 331,261 ms | 2,08x; filas decodificadas bajan de 1.000.000 a 163.137 |
-| Índice CockroachDB / INSERT 20.000 | 460,19 ms | 508,56 ms | El índice añade aproximadamente 10,5 % de costo de escritura |
+Medianas en ms; mín – máx y desviación estándar muestral (s) tomados de `docs/taller4/estadisticas_*.csv`.
 
-**No interpretar Hive como una mejora de tiempo:** su evidencia favorable es la reducción de lectura física; en este volumen el tiempo total empeoró. Tampoco confundir el benchmark SQLite/DuckDB del pipeline con el experimento de índice CockroachDB: son pruebas distintas.
+| Experimento | n | Antes (mediana) | Después (mediana) | Factor | Antes: mín – máx (s) | Después: mín – máx (s) | Lectura correcta |
+|---|---:|---:|---:|---:|---|---|---|
+| Ordenamiento / Q1 | 5 | 4,97 | 5,02 | 0,99x | 4,78 – 5,25 (0,18) | 4,58 – 5,29 (0,28) | 1,8x menos bytes leídos (261,1 → 142,4 kB); sin ganancia de tiempo: la diferencia (~1 %) está dentro de la dispersión |
+| Hive / Q2 | 5 | 2,44 | 3,14 | 0,78x | 2,18 – 3,19 (0,39) | 2,73 – 3,37 (0,26) | 4,2x menos bytes (246,3 → 58,8 kB); tiempo ~29 % peor por overhead de archivos/particiones |
+| ANALYZE / Q3 (control) | 5 | 2,65 | 2,69 | 0,98x | 2,56 – 2,76 (0,09) | 2,62 – 3,20 (0,25) | Resultado nulo esperado: plan idéntico |
+| VARCHAR → TIMESTAMP | 9 | 14,338 | 4,285 | 3,35x | 14,06 – 15,03 (0,31) | 3,81 – 4,37 (0,22) | 3,35x más rápido; mismos 34.039 registros y 3.689.715.500 COP |
+| Índice CockroachDB / lectura | 7 | 426,217 | 210,591 | 2,02x | 414,86 – 443,16 (11,39) | 208,76 – 211,91 (1,12) | 2,02x; filas decodificadas bajan de 1.000.000 a 164.066 |
+| Índice CockroachDB / INSERT 20.000 | 3 | 308,35 | 358,24 | 1,16x de costo | 306,76 – 332,59 (14,47) | 348,79 – 386,82 (19,80) | El índice añade ~16,2 % de costo de escritura |
+
+**No interpretar Hive como una mejora de tiempo:** su evidencia favorable es la reducción de lectura física; en este volumen el tiempo total empeoró. Lo mismo vale para el ordenamiento de Q1: redujo los bytes leídos, pero no el tiempo. Tampoco confundir el benchmark SQLite/DuckDB del pipeline con el experimento de índice CockroachDB: son pruebas distintas.
 
 ### 12.3. Qué está listo en el repositorio
 
@@ -274,24 +277,24 @@ Estos valores son resultados de ejecuciones anteriores registradas en la documen
 - [x] Planes de ejecución antes/después para Q1 y Q2.
 - [x] Planes de ejecución de Q3 y de la comparación de tipos.
 - [x] Planes CockroachDB de full scan e index scan.
-- [x] Resultados históricos y explicación de los costos/beneficios.
+- [x] Resultados de la corrida final y explicación de los costos/beneficios.
 - [x] Informe técnico de Taller 4 en Markdown y PDF.
-- [x] Guía para regenerar las mediciones y estadísticas: [estadística M4 reproducible](entrega_final/estadistica_m4_reproducible.md).
+- [x] Guía para regenerar las mediciones y estadísticas: [estadística M4 reproducible](docs/entrega_final/estadistica_m4_reproducible.md).
 
-### 12.4. Qué falta hacer en el equipo local antes de cerrar la entrega
+### 12.4. Checklist de la corrida final y cierre de la entrega
 
-- [ ] Ejecutar el pipeline desde la raíz del repositorio: `python main.py`.
-- [ ] Levantar CockroachDB y comprobar el laboratorio OLTP: `docker compose up -d`, luego `python -m scripts.oltp.load_cockroach`.
-- [ ] Ejecutar `python -m scripts.oltp.benchmark_cockroach`.
-- [ ] Ejecutar `python -m scripts.taller4_optimizacion`.
-- [ ] Ejecutar `python -m scripts.taller4_tipos`.
-- [ ] Ejecutar `python -m scripts.taller4_complementario`.
-- [ ] Confirmar que se generaron y revisar los seis CSV: `mediciones_crudas_duckdb.csv`, `estadisticas_duckdb.csv`, `mediciones_crudas_tipos.csv`, `estadisticas_tipos.csv`, `mediciones_crudas_cockroach.csv`, `estadisticas_cockroach.csv` dentro de `docs/taller4/`.
-- [ ] Comparar los CSV reales con las medianas históricas; si difieren, documentar la nueva corrida y no reemplazar cifras sin explicar el cambio.
-- [ ] Revisar que el PDF final que se entregue corresponda a la última versión de los documentos y contenga las cifras definitivas.
+- [x] Ejecutar el pipeline desde la raíz del repositorio: `python main.py` (con `USE_SYNTHETIC=false`, extracción desde CockroachDB; 6,92 s).
+- [x] Levantar CockroachDB y comprobar el laboratorio OLTP: `docker compose up -d`, luego `python -m scripts.oltp.load_cockroach`.
+- [x] Ejecutar `python -m scripts.oltp.benchmark_cockroach`.
+- [x] Ejecutar `python -m scripts.taller4_optimizacion`.
+- [x] Ejecutar `python -m scripts.taller4_tipos`.
+- [x] Ejecutar `python -m scripts.taller4_complementario`.
+- [x] Confirmar que se generaron y revisar los seis CSV: `mediciones_crudas_duckdb.csv`, `estadisticas_duckdb.csv`, `mediciones_crudas_tipos.csv`, `estadisticas_tipos.csv`, `mediciones_crudas_cockroach.csv`, `estadisticas_cockroach.csv` dentro de `docs/taller4/`.
+- [x] Comparar los CSV reales con las medianas históricas y documentar la nueva corrida: las cifras de los documentos se actualizaron a la corrida final y se declara que las medianas de desarrollo diferían.
+- [x] Revisar que el PDF final que se entregue corresponda a la última versión de los documentos y contenga las cifras definitivas (`docs/taller4/informe_taller4.pdf` e `docs/informe_final.pdf` regenerados).
 - [ ] Verificar el contenido del ZIP final y que incluya los archivos que se van a entregar.
 
-Los CSV anteriores **no se consideran presentes ni generados hasta comprobarlos después de ejecutar los comandos**. Las medianas históricas y los planes versionados sí están documentados en el repositorio.
+Los seis CSV existen en `docs/taller4/` y provienen de la corrida final del 26-11-2026. Los controles complementarios (mediana de 15) quedan en `analisis_complementario.md`; no tienen CSV porque su protocolo es distinto.
 
 ### 12.5. Limitaciones que deben declararse en la sustentación
 
@@ -302,5 +305,4 @@ Los CSV anteriores **no se consideran presentes ni generados hasta comprobarlos 
 - El pipeline es batch; no implementa CDC ni streaming.
 - Las mediciones dependen del equipo, versión, caché y carga del sistema. No son garantías de rendimiento en producción.
 
-**Criterio de cierre:** el Taller 4 está implementado y documentado en el repositorio, pero la entrega no debe marcarse como completamente reproducida hasta ejecutar los experimentos en el equipo final, conservar los CSV crudos/estadísticos y revisar el PDF/ZIP que se enviarán.
-
+**Criterio de cierre:** el Taller 4 está implementado, documentado y reproducido en el equipo final (corrida del 26-11-2026): los CSV crudos y estadísticos están conservados y los PDF corresponden a las cifras definitivas. Lo único pendiente antes de enviar es verificar el contenido del ZIP final.

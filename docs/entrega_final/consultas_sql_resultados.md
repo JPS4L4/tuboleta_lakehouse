@@ -1,6 +1,6 @@
 # Consultas SQL de negocio y resultados — entrega final
 
-Este documento reúne consultas completas del modelo Gold para que puedan revisarse y ejecutarse de forma independiente. Los resultados de referencia provienen de `docs/resultados_consultas.md`, generado por `scripts/analyze.py` el **16-11-2026 a las 23:19**. Se conserva la salida de esa ejecución; no se presentan como resultados de una corrida nueva.
+Este documento reúne consultas completas del modelo Gold para que puedan revisarse y ejecutarse de forma independiente. Los resultados de referencia provienen de `docs/resultados_consultas.md`, generado por `scripts/analyze.py` en la corrida final del **26-11-2026 a las 16:40**. Esa salida coincide con la de la ejecución del 16-11-2026 a las 23:19: los resultados de las consultas no cambiaron, solo la fecha de generación.
 
 **Motor:** DuckDB sobre Parquet Gold.  
 **Granularidad:** una fila de `fact_ventas_boletas` representa una silla vendida y pagada; una fila de `fact_intentos_compra` representa un intento.  

@@ -5,6 +5,6 @@ Método: warm-up ×3, mediana de 5 ejecuciones. Q3 antes/después medido sobre t
 
 | Query | Problema (vocabulario M4) | Intervención | t antes (ms) | t después (ms) | Factor | ¿Cambió el plan? |
 |---|---|---|---:|---:|---:|---|
-| Q1 | Sin data skipping: 1 row group, se lee toda la fact | I-3 ordenar por tiempo_sk (rg=20K) | 5.09 | 4.83 | 1.05x | row groups: 1 -> 11 |
-| Q2 | Filtro por mes sobre un único Parquet (full scan de la fact) | I-6 particionar Hive year/month | 2.31 | 2.55 | 0.91x | carpetas leídas: 1 de 9 (partition pruning) |
-| Q3 | Sin problema de acceso: agregación simple, join con dim de 5 filas | I-2 ANALYZE (control) | 2.58 | 2.43 | 1.06x | No — plan idéntico: Hash Group By + Projection + Hash Join + Table Scan |
+| Q1 | Sin data skipping: 1 row group, se lee toda la fact | I-3 ordenar por tiempo_sk (rg=20K) | 4.97 | 5.02 | 0.99x | row groups: 1 -> 11 |
+| Q2 | Filtro por mes sobre un único Parquet (full scan de la fact) | I-6 particionar Hive year/month | 2.44 | 3.14 | 0.78x | carpetas leídas: 1 de 9 (partition pruning) |
+| Q3 | Sin problema de acceso: agregación simple, join con dim de 5 filas | I-2 ANALYZE (control) | 2.65 | 2.69 | 0.98x | No — plan idéntico: Hash Group By + Projection + Hash Join + Table Scan |

@@ -1,5 +1,5 @@
 ╭─ Summary ───────────╮
-│ Total Time: 0.0029s │
+│ Total Time: 0.0035s │
 │ Data Read:  58.8 kB │
 ╰─────────────────────╯
 ╭─ Hash Group By ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -18,7 +18,7 @@
 │ Scanning Files: 1/9                                                                                                                         │
 │ Total Files Read: 1                                                                                                                         │
 │ Filename(s):                                                                                                                                │
-│ C:/Users/devte/Documents/development/coding/personal/tuboleta_lakehouse/lakehouse/gold_t4/fact_particionada/year=2026/month=09/data.parquet │
+│ <repo>/lakehouse/gold_t4/fact_particionada/year=2026/month=09/data.parquet │
 │ Row Groups Scanned: 1 / 1                                                                                                                   │
-│ 34,039 rows                                                                                                                             0µs │
+│ 34,039 rows                                                                                                                          10.0ms │
 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

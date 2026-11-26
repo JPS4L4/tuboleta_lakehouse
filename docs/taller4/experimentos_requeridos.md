@@ -19,6 +19,7 @@ El tratamiento debe describirse por ruta de ejecución, porque las fuentes no co
 - **Sintético directo:** Bronze tenía 210.358 compras y 262.936 intentos. Silver conservó 208.236 compras y 260.294 intentos; imputó 3.101 NULL de `canal_id` en compras y 3.906 en intentos, además de deduplicar y descartar registros sin clave.
 - **CockroachDB, corrida anterior:** se documentó una extracción con cero NULL resueltos. Esa ejecución por sí sola no demostraba la imputación en la ruta OLTP.
 - **CockroachDB, corrida verificada de las 23:19:** `main.py` se ejecutó con `USE_SYNTHETIC=false` contra CockroachDB v25.4.0. Las siete tablas Bronze quedaron marcadas `_fuente=cockroachdb`. SQL directo y Bronze coincidieron: `compras_confirmadas` 208.236 filas / 3.101 NULL de `canal_id`; `intentos_compra` 260.294 / 3.906 NULL. Silver resolvió esos mismos NULL como `DESCONOCIDO`. Esto valida CockroachDB → Bronze → Silver.
+- **CockroachDB, corrida final del 26-11-2026 (16:40):** `main.py` con `USE_SYNTHETIC=false` (`Fuente: CockroachDB`). Bronze y Silver conservaron 208.236 compras y 260.294 intentos; Silver imputó 3.101 y 3.906 NULL de `canal_id` como `DESCONOCIDO`. De esta corrida provienen las cifras de rendimiento vigentes.
 
 El snapshot cargado en CockroachDB fue generado por el cargador sintético del laboratorio. La ejecución valida conexión, transporte y calidad del flujo, pero no usa ventas reales de TuBoleta. El detalle de ambas rutas está en [ejecuciones_pipeline.md](ejecuciones_pipeline.md).
 
@@ -79,8 +80,8 @@ python -m scripts.oltp.benchmark_cockroach
 - El plan anterior muestra lectura completa de la tabla o ausencia de un rango selectivo sobre tiempo_sk.
 - El plan posterior muestra el índice compuesto solicitado. El script usa FORCE_INDEX para que la comparación mida ese acceso; además conserva el plan real.
 - Se mide la inserción sobre una tabla aislada con y sin índice secundario, con el mismo lote.
-- Resultados medidos: la mediana de consulta CockroachDB fue 687,713 ms sin índice y 331,261 ms con índice; la inserción de 20.000 filas pasó de 460,19 a 508,56 ms. No son mediciones de producción.
-- En DuckDB, VARCHAR + CAST dio 19,887 ms frente a 4,996 ms con TIMESTAMP (3,98x); ambos escenarios devolvieron 34.039 filas y 3.689.715.500 COP.
+- Resultados medidos: en la corrida final del 26-11-2026, la mediana de consulta CockroachDB fue 426,217 ms sin índice y 210,591 ms con índice (2,02x); la inserción de 20.000 filas pasó de 308,35 a 358,24 ms (+16,2 %). No son mediciones de producción.
+- En DuckDB, VARCHAR + CAST dio 14,338 ms frente a 4,285 ms con TIMESTAMP (3,35x); ambos escenarios devolvieron 34.039 filas y 3.689.715.500 COP.
 - Se conserva el resultado de tipos aunque el tiempo no mejore: una diferencia pequeña o negativa debe analizarse, no ocultarse.
 - Tras la carga CockroachDB, el NULL de canal_id debe seguir presente en Bronze y el contador de Silver debe ser mayor que cero. Silver debe dejar cero nulos en esa columna después de imputar DESCONOCIDO.
 - Los tiempos son resultados locales reproducibles, no cifras universales.

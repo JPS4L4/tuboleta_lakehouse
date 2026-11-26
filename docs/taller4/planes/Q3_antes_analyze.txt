@@ -1,11 +1,11 @@
 ╭─ Summary ───────────╮
-│ Total Time: 0.0025s │
+│ Total Time: 0.0029s │
 ╰─────────────────────╯
 ╭─ Hash Group By ─────────────────────────╮
 │ Groups: #0                              │
 │ Aggregates: count_star(), sum(#1),      │
 │             sum(#2), sum(#3)            │
-│ 5 rows                              0µs │
+│ 5 rows                           10.0ms │
 ╰────────────────────┒┎───────────────────╯
 ╭─ Projection ───────┚┖───────────────────╮
 │ Projections:                            │

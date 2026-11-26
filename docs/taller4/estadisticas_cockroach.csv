@@ -1,0 +1,5 @@
+medicion,n,mediana_ms,min_ms,max_ms,desviacion_estandar_muestral_ms
+insert_con_indice,3,358.2443,348.7881,386.8234,19.8026
+insert_sin_indice,3,308.3453,306.7608,332.5851,14.4740
+lectura_con_indice,7,210.5908,208.7586,211.9116,1.1191
+lectura_sin_indice,7,426.2172,414.8571,443.1641,11.3913

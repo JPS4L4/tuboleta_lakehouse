@@ -1,0 +1,8 @@
+medicion,n,mediana_ms,min_ms,max_ms,desviacion_estandar_muestral_ms
+Q1_antes,5,4.9685,4.7801,5.2538,0.1792
+Q2_antes,5,2.4360,2.1812,3.1896,0.3907
+Q3_antes,5,5.4853,5.3407,5.7529,0.1890
+Q1_despues_ordenamiento,5,5.0216,4.5836,5.2936,0.2823
+Q2_despues_hive,5,3.1393,2.7268,3.3723,0.2582
+Q3_antes_analyze,5,2.6504,2.5614,2.7622,0.0866
+Q3_despues_analyze,5,2.6927,2.6167,3.2044,0.2457
